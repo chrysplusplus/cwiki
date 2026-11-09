@@ -1,0 +1,4 @@
+-- Neovim global plugin for cwiki
+-- Date:       2026-11-09
+-- Maintainer: chrysplusplus
+-- License:    Public domain
