@@ -1,0 +1,30 @@
+# Auto generated wiki config file
+name: Example Wiki
+author: chrysplusplus
+description: >
+  This is an example wiki with a brief description,
+  used to aid the development of cwiki.
+
+features:
+  - autotitle
+  - autoauthor
+  - autodate
+
+vars:
+  disallowed: &disallowed [404, cursewords] # banned page names
+
+special-pages:
+  - path: index
+    type: index
+
+  - path: diary/diary
+    type: virtual
+    generate: { use: defaults/diary_index.yaml }
+
+  - path: tags
+    type: virtual
+    generate: { use: defaults/list_tags.yaml }
+
+  - paths: *disallowed
+    type: disallow
+
