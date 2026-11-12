@@ -84,24 +84,31 @@ local INDICATORS = {
 }
 
 local TokenType = enum{
-  "Error",
   "Indent",
-  "LineBreak",
   "DocumentEnd",
-  "SeqIndicator",
-  "SeqEntry",
-  "MapKey",
+  "SingleQuote",
+  "DoubleQuote",
+  "Folded",
+  "MapValue",
+  "SeqBegin",
+  "SeqEnd",
+  "MapBegin",
+  "MapEnd",
+  "Collect",
+  "Anchor",
+  "Alias",
 }
 
 local TokeniserState = enum{
   "Finished",
-  "ParseIndent",
-  "ExpectPlainOrIndicator",
-  "ExpectSeqSepOrFallback",
-  "ExpectSeqEntryStart",
-  "ExpectSeqEntry",
-  "EmitMap",
-  "EmitDocumentEnd",
+  "EmitIndent",
+  "FindTokenStart",
+  "FindUnescapedFlowScalarEnd",
+  "FindEscapedFlowScalarEnd",
+  "EmitIndentForFoldedScalar",
+  "EmitSeqOrFallback",
+  "FindTokenStartInFlow",
+  "FindPlainScalarEnd"
 }
 
 if DEBUG then
@@ -128,15 +135,17 @@ if DEBUG then
       end
     end
 
-    print("{ " .. table.concat(keyvals, ", ") .. " }")
+    print(string.format("{ %s }", table.concat(keyvals, ", ")))
   end
 end
 
+-- Tokeniser objects represent a generator that emits a sequence of lexical
+-- tokens that represents the received source string
 local Tokeniser = {}
 function Tokeniser:new(s)
   local ret = {
     source = s,
-    state = TokeniserState.ParseIndent,
+    state = TokeniserState.EmitIndent,
     index = 1,
     line = { nr = 1, index = 0 },
     fallback_stack = {},
@@ -167,20 +176,20 @@ function Tokeniser:emit_error_token(msg)
   return { type = TokenType.Error, text = msg, line = line, col = col }
 end
 
--- Set the TokeniserState to `next_state`, then return a new token of type
--- `type` with optional values
+-- Return a new token of type `type` with optional values
 --
 -- Note: the text key of the returned table is defaulted to an empty string if
 -- not provided
-function Tokeniser:emit_token(type, next_state, vars)
-  assert(type)
-  assert(next_state)
+function Tokeniser:emit_token(type_, vars)
+  assert(type_, "Not a member of TokenType")
   local vars = vars or {}
 
-  self.state = next_state
-  local ret = { type = type }
+  if DEBUG and type(vars) ~= "table" then
+    print(string.format("vars: %s", vars))
+  end
+
+  local ret = { type = type_ }
   for k,v in pairs(vars) do
-    assert(k ~= "type")
     ret[k] = v
   end
 
@@ -188,9 +197,40 @@ function Tokeniser:emit_token(type, next_state, vars)
   return ret
 end
 
+function Tokeniser:transition_state(next_state)
+  assert(next_state, "Not a member of TokeniserState")
+  self.state = next_state
+end
+
+-- Set the tokeniser state to `next_state`, then return a new token of type
+-- `type` with optional values
+--
+-- Note: the text key of the returned table is defaulted to an empty string if
+-- not provided
+function Tokeniser:set_emit_type_and_transition_state_and_emit_token(type_, next_state, vars)
+  self:transition_state(next_state)
+  return self:emit_token(type_, vars)
+end
+
+-- Set the tokeniser state to `next_state`, then return a new token of type
+-- `type` with optional values
+--
+-- Note: the text key of the returned table is defaulted to an empty string if
+-- not provided
+function Tokeniser:transition_state_and_emit_token(next_state, type_, vars)
+  self:transition_state(next_state)
+  return self:emit_token(type_, vars)
+end
+
 -- Create fallback point for backtracking state but not the accumulator
 function Tokeniser:create_fallback()
   table.insert(self.fallback_stack, self.state)
+end
+
+-- Create fallback point for backtracking state to explicit state
+function Tokeniser:create_fallback_to_state(state)
+  assert(state)
+  table.insert(self.fallback_stack, state)
 end
 
 -- Remove last fallback point
@@ -212,133 +252,106 @@ function Tokeniser:next()
   if self.state == TokeniserState.Finished then
     return nil
 
-  elseif self.state == TokeniserState.ParseIndent then
+  elseif self.state == TokeniserState.EmitIndent then
+    local line, _ = self:position()
     local new_index = consume_indent(self.source, self.index)
     local indent = new_index - self.index
     self.index = new_index
-    return self:emit_token(TokenType.Indent, TokeniserState.ExpectPlainOrIndicator, { indent = indent })
+    return self:transition_state_and_emit_token(TokeniserState.FindTokenStart, TokenType.Indent, { index =  indent, line = line })
 
-  elseif self.state == TokeniserState.ExpectPlainOrIndicator then
-    if ch == INDICATORS.MAP_VALUE or ch == INDICATORS.SEQ_END or ch == INDICATORS.MAP_END or ch == INDICATORS.COLLECT then
-      return self:emit_error_token("Unexpected symbol")
-
-    elseif ch == INDICATORS.EOF then
-      return self:emit_token(TokenType.DocumentEnd, TokeniserState.Finished)
+  elseif self.state == TokeniserState.FindTokenStart then
+    if ch == INDICATORS.EOF then
+      self:transition_state(TokeniserState.Finished)
+      return self:emit_token(TokenType.DocumentEnd)
 
     elseif ch == INDICATORS.EOL then
       self.index = self.index + 1
-      self:_line_start_at(self.index)
-      return self:emit_token(TokenType.LineBreak, TokeniserState.ParseIndent)
+      self:transition_state(TokeniserState.EmitIndent)
+      return self:next()
 
     elseif ch == INDICATORS.COMMENT then
-      self.index, _ = consume_line(self.source, self.index)
-      self:_line_start_at(self.index)
-      return self:emit_token(TokenType.LineBreak, TokeniserState.ParseIndent)
+      self.index = consume_line(self.source, self.index)
+      self:transition_state(TokeniserState.EmitIndent)
+      return self:next()
 
     elseif ch == INDICATORS.SINGLE_QUOTE then
-      assert(false, "Not implemented")
+      local line, col = self:position()
+      self.index = self.index + 1
+      self:transition_state(TokeniserState.FindUnescapedFlowScalarEnd)
+      return self:emit_token(TokenType.SingleQuote, { text = INDICATORS.SINGLE_QUOTE, line = line, col = col })
+
     elseif ch == INDICATORS.DOUBLE_QUOTE then
-      assert(false, "Not implemented")
+      local line, col = self:position()
+      self.index = self.index + 1
+      self:transition_state(TokeniserState.FindEscapedFlowScalarEnd)
+      return self:emit_token(TokenType.DoubleQuote, { text = INDICATORS.DOUBLE_QUOTE, line = line, col = col })
+
     elseif ch == INDICATORS.FOLDED then
-      assert(false, "Not implemented")
+      local line, col = self:position()
+      self.index = self.index + 1
+      self:transition_state(TokeniserState.EmitIndentForFoldedScalar)
+      return self:emit_token(TokenType.Folded, { text = INDICATORS.FOLDED, line = line, col = col })
 
     elseif ch == INDICATORS.SEQ then
       local line, col = self:position()
       self.index = self.index + 1
-      self:create_fallback()
-      return self:emit_token(TokenType.SeqIndicator, TokeniserState.ExpectSeqSepOrFallback, { text = INDICATORS.SEQ, line = line, col = col })
-
-    elseif ch == INDICATORS.SEQ_BEGIN then
-      assert(false, "Not implemented")
-    elseif ch == INDICATORS.MAP_BEGIN then
-      assert(false, "Not implemented")
-    elseif ch == INDICATORS.ANCHOR then
-      assert(false, "Not implemented")
-    elseif ch == INDICATORS.ALIAS then
-      assert(false, "Not implemented")
-    else
-      assert(false, "Not implemented")
-    end
-
-  elseif self.state == TokeniserState.ExpectSeqSepOrFallback then
-    -- YAML spec can have any amount of whitespace; I'm allowing one space only
-    if ch == " " then
-      self.index = self.index + 1
-      self.state = TokeniserState.ExpectSeqEntryStart
-      self:remove_fallback()
+      self:transition_state(TokeniserState.EmitSeqOrFallback)
       return self:next()
-    else -- assume seq indicator would match fallback state
-      self.accumulator = self.accumulator .. INDICATORS.SEQ
-      self:fall_back()
-      return self:next()
-    end
-
-  elseif self.state == TokeniserState.ExpectSeqEntryStart then
-    if util.contains({ INDICATORS.EOF, INDICATORS.EOL, INDICATORS.COMMENT, INDICATORS.MAP_VALUE, INDICATORS.SEQ_END, INDICATORS.MAP_END, INDICATORS.COLLECT }, ch) then
-      return self:emit_error_token("Expected sequence entry")
-
-    elseif ch == INDICATORS.SINGLE_QUOTE then
-      assert(false, "Not implemented")
-    elseif ch == INDICATORS.DOUBLE_QUOTE then
-      assert(false, "Not implemented")
-    elseif ch == INDICATORS.FOLDED then
-      assert(false, "Not implemented")
-    elseif ch == INDICATORS.SEQ_BEGIN then
-      assert(false, "Not implemented")
-    elseif ch == INDICATORS.MAP_BEGIN then
-      assert(false, "Not implemented")
-    elseif ch == INDICATORS.ANCHOR then
-      assert(false, "Not implemented")
-    elseif ch == INDICATORS.ALIAS then
-      assert(false, "Not implemented")
-
-    else
-      self.accumulator = self.accumulator .. ch
-      self.index = self.index + 1
-      self.state = TokeniserState.ExpectSeqEntry
-      return self:next()
-    end
-
-  elseif self.state == TokeniserState.ExpectSeqEntry then
-    if util.contains({ INDICATORS.DOUBLE_QUOTE, INDICATORS.SEQ_BEGIN, INDICATORS.SEQ_END, INDICATORS.MAP_BEGIN, INDICATORS.MAP_END, INDICATORS.COLLECT }, ch) then
-      return self:emit_error_token("Symbol not allowed in plain scalars; use quotes")
-
-    elseif ch == INDICATORS.EOF then
-      local text = trim_trailing(self.accumulator)
-      self.accumulator = ""
-      return self:emit_token(TokenType.SeqEntry, TokeniserState.EmitDocumentEnd, {text = text })
-
-    elseif ch == INDICATORS.EOL then
-      local text = trim_trailing(self.accumulator)
-      self.accumulator = ""
-      self.index = self.index + 1
-      return self:emit_token(TokenType.SeqEntry, TokeniserState.ParseIndent, { text = text })
-
-    elseif ch == INDICATORS.COMMENT then
-      local text = trim_trailing(self.accumulator)
-      self.accumulator = ""
-      self.index = consume_line(self.source, self.index)
-      return self:emit_token(TokenType.SeqEntry, TokeniserState.ParseIndent, { text = text })
-
-    elseif ch == INDICATORS.FOLDED then
-      assert(false, "Not implemented")
 
     elseif ch == INDICATORS.MAP_VALUE then
-      local text = trim_trailing(self.accumulator)
-      self.accumulator = ""
-      return self.emit_token(TokenType.MapKey, TokeniserState.EmitMap, { text = text })
+      local line, col = self:position()
+      self.index = self.index + 1
+      return self:emit_token(TokenType.MapValue, { text = INDICATORS.MAP_VALUE, line = line, col = col })
+
+    elseif ch == INDICATORS.SEQ_BEGIN then
+      local line, col = self:position()
+      self.index = self.index + 1
+      self:transition_state(TokeniserState.FindTokenStartInFlow)
+      return self:emit_token(TokenType.SeqBegin, { text = INDICATORS.SEQ_BEGIN, line = line, col = col })
+
+    elseif ch == INDICATORS.SEQ_END then
+      local line, col = self:position()
+      self.index = self.index + 1
+      return self:emit_token(TokenType.SeqEnd, { text = INDICATORS.SEQ_END, line = line, col = col })
+
+    elseif ch == INDICATORS.MAP_BEGIN then
+      local line, col = self.position()
+      self.index = self.index + 1
+      self:transition_state(TokeniserState.FindTokenStartInFlow)
+      return self:emit_token(TokenType.MapBegin, { text = INDICATORS.MAP_BEGIN, line = line, col = col })
+
+    elseif ch == INDICATORS.MAP_END then
+      local line, col = self:position()
+      self.index = self.index + 1
+      return self:emit_token(TokenType.MapEnd, { text = INDICATORS.MAP_END, line = line, col = col })
+
+    elseif ch == INDICATORS.COLLECT then
+      local line, col = self:position()
+      self.index = self.index + 1
+      return self:emit_token(TokenType.Collect, { text = INDICATORS.COLLECT, line = line, col = col })
+
+    elseif ch == INDICATORS.ANCHOR then
+      local line, col = self:position()
+      self.index = self.index + 1
+      return self:emit_token(TokenType.Anchor, { text = INDICATORS.ANCHOR, line = line, col = col })
+
+    elseif ch == INDICATORS.ALIAS then
+      local line, col = self:position()
+      self.index = self.index + 1
+      return self:emit_token(TokenType.Alias, { text = INDICATORS.ALIAS, line = line, col = col })
+
+    elseif ch == " " or ch == "\t" then
+      self.index = self.index + 1
+      return self:next()
 
     else
-      self.accumulator = self.accumulator .. ch
+      self.accumulator = ch
       self.index = self.index + 1
+      self:transition_state(TokeniserState.FindPlainScalarEnd)
       return self:next()
     end
 
-  elseif self.state == TokeniserState.EmitMap then
-    assert(false, "Not implemented")
-
-  elseif self.state == TokeniserState.EmitDocumentEnd then
-    return self:emit_token(TokenType.DocumentEnd, TokeniserState.Finished)
+    if DEBUG then assert(false, "Unreachable") end
 
   else
     assert(false, "Unreachable")
