@@ -108,6 +108,18 @@ local function consume_word(s, idx)
   end
 end
 
+local ANCHOR_NAME_PATTERN = "^[%a_][%w_]*"
+
+-- Match the anchor name at the received index in the received string; if a
+-- match was found, return the index of the character past the match and the
+-- match itself, otherwise return the received index and a nil value,
+-- representing no match
+local function consume_anchor_name(s, idx)
+  local b, e = s:find(ANCHOR_NAME_PATTERN, idx)
+  if not b then return idx, nil end
+  return e + 1, s:sub(b, e)
+end
+
 -- Trim trailing spaces from string
 local function trim_trailing(s)
   local i, _ = s:find("%s+$")
@@ -133,6 +145,7 @@ local TokenType = enum{
   "PlainScalar",
   "UnescapedScalar",
   "EscapedScalar",
+  "AnchorName",
 }
 
 local TokeniserState = enum{
@@ -307,7 +320,7 @@ function Tokeniser:next()
       local line, col = self:position()
       self.index = self.index + 1
       self:transition_state(TokeniserState.FindBlockAnchorName)
-      return self.emit_character_token(ch, { line = line, col = col })
+      return self:emit_character_token(ch, { line = line, col = col })
 
     elseif ch == INDICATORS.SEQ_BEGIN or ch == INDICATORS.MAP_BEGIN or ch == INDICATORS.FOLDED or ch == INDICATORS.MAP_VALUE or ch == INDICATORS.SEQ_END or ch == INDICATORS.MAP_END or ch == INDICATORS.COLLECT then
       local line, col = self:position()
@@ -424,6 +437,12 @@ function Tokeniser:next()
     return self:emit_character_token(INDICATORS.DOUBLE_QUOTE, { line = line, col = col })
 
   elseif self.state == TokeniserState.FindBlockAnchorName then
+    local line, col = self:position()
+    local anchor_name
+    self.index, anchor_name = consume_anchor_name(self.source, self.index)
+    self:transition_state(TokeniserState.FindBlockTokenStart)
+    if not anchor_name then return self:next() end
+    return self:emit_token(TokenType.AnchorName, { text = anchor_name, line = line, col = col })
   end
 
   if DEBUG then assert(false, "Unreachable") end

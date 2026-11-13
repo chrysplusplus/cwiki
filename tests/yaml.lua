@@ -5,7 +5,6 @@ local report_pass = common.report_pass
 local report_fail = common.report_fail
 
 local yaml = require("cwiki.yaml")
-
 local TokenType = yaml.TokenType
 
 local M = {}
@@ -247,21 +246,71 @@ function M.test_escaped_scalar_with_escaped_newline_tokens(testrun)
 end
 
 function M.test_escaped_scalar_with_bad_escaped_character(testrun)
-  local try_gen = function ()
+  local status, err = pcall(function ()
     local tokeniser = yaml.Tokeniser:new '"ba\\d"'
     for _ = 1, 3 do
       tokeniser:next()
     end
-  end
-
-  local status, err = pcall(try_gen)
+  end)
   if not status and err:find("Unrecognised escape character \\d: line 1, col 4") then
     return report_pass(testrun)
   elseif not status then
     return report_fail(testrun, "Error message has been changed")
   else
-    return report_fails(testrun, "Tokeniser did not yield an error")
+    return report_fail(testrun, "Tokeniser did not yield an error")
   end
+end
+
+function M.test_escaped_scalar_with_last_character_escaped(testrun)
+  local status, err = pcall(function ()
+    local tokeniser = yaml.Tokeniser:new '"\\'
+    for _ = 1, 3 do
+      tokeniser:next()
+    end
+  end)
+  if not status and err:find("Lone escape character at end%-of%-file: line 1, col 2") then
+    return report_pass(testrun)
+  elseif not status then
+    return report_fail(testrun, "Error message has been changed")
+  else
+    return report_fail(testrun, "Tokeniser did not yield an error")
+  end
+end
+
+function M.test_anchor_name_tokens(testrun)
+  local expected = {
+    { line = 1, indent = 0, text = "", type = TokenType.Indent },
+    { line = 1, type = TokenType.Anchor, text = "&", col = 1 },
+    { line = 1, type = TokenType.AnchorName, text = "anchor_name_1", col = 2 },
+    { type = TokenType.DocumentEnd, text = "" },
+  }
+  local tokens = generate_tokens("&anchor_name_1", 4)
+  local status, msg = check_tokens(expected, tokens)
+  return test_result(testrun, status, msg)
+end
+
+function M.test_alias_tokens(testrun)
+  local expected = {
+    { line = 1, indent = 0, text = "", type = TokenType.Indent },
+    { line = 1, type = TokenType.Alias, text = "*", col = 1 },
+    { line = 1, type = TokenType.AnchorName, text = "anchor_name_1", col = 2 },
+    { type = TokenType.DocumentEnd, text = "" },
+  }
+  local tokens = generate_tokens("*anchor_name_1", 4)
+  local status, msg = check_tokens(expected, tokens)
+  return test_result(testrun, status, msg)
+end
+
+function M.test_bad_anchor_name_tokens(testrun)
+  local expected = {
+    { line = 1, indent = 0, text = "", type = TokenType.Indent },
+    { line = 1, type = TokenType.Anchor, text = "&", col = 1 },
+    { line = 1, type = TokenType.PlainScalar, text = "6anchor", col = 2 },
+    { type = TokenType.DocumentEnd, text = "" },
+  }
+  local tokens = generate_tokens("&6anchor", 4)
+  local status, msg = check_tokens(expected, tokens)
+  return test_result(testrun, status, msg)
 end
 
 return M
