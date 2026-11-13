@@ -28,6 +28,9 @@ table.sort(all_tests)
 io.stdout:write("Running tests:\n")
 
 run = common.new_testrun()
+run.hooks.on_pass = function (...) io.stdout:write(".") end
+run.hooks.on_fail = function (...) io.stdout:write("!") end
+
 for _, testname in ipairs(all_tests) do
   local testfn = all_tests[testname]
   assert(testfn)

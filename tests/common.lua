@@ -8,6 +8,10 @@ function M.new_testrun()
     failures = 0,
     total = 0,
     tests = {},
+    hooks = {
+      on_pass = nil, -- function (testrun, msg) | nil
+      on_fail = nil, -- function (testrun, msg) | nil
+    }
   }
 end
 
@@ -20,12 +24,14 @@ end
 function M.report_pass(testrun, msg)
   local msg = msg or ""
   add_test(testrun, "pass", msg)
+  if testrun.hooks.on_pass then testrun.hooks.on_pass(testrun, msg) end
   testrun.passes = testrun.passes + 1
 end
 
 function M.report_fail(testrun, msg)
   local msg = msg or ""
   add_test(testrun, "fail", msg)
+  if testrun.hooks.on_fail then testrun.hooks.on_fail(testrun, msg) end
   testrun.failures = testrun.failures + 1
 end
 
