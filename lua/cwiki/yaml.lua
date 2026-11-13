@@ -11,9 +11,65 @@ local util = require "cwiki.util"
 local enum = util.enum
 local enum_to_string = util.enum_to_string
 
--- Peek at the character at index
+-- Table of recognised YAML indicators; anything commented out is recognised in
+-- YAML but not by this parser
+local INDICATORS = {
+  EOF          = -1,
+  EOL          = "\n",
+  COMMENT      = "#",
+  SINGLE_QUOTE = "'",
+  DOUBLE_QUOTE = '"',
+  -- LITERAL      = "|",
+  FOLDED       = ">",
+  -- CHOMP_STRIP  = "-",
+  -- CHOMP_KEEP   = "+",
+  SEQ          = "-",
+  -- MAP_KEY      = "?",
+  MAP_VALUE    = ":",
+  SEQ_BEGIN    = "[",
+  SEQ_END      = "]",
+  MAP_BEGIN    = "{",
+  MAP_END      = "}",
+  COLLECT      = ",",
+  ANCHOR       = "&",
+  ALIAS        = "*",
+}
+
+-- Table of escape characters recognised by YAML; again, anything commented out
+-- is not recognised by this parser
+local ESCAPES = { -- to the country
+  -- ["0"] = "",   -- null
+  -- ["a"] = "",   -- bell
+  -- ["b"] = "",   -- backspace
+  ["t"] = "\t", -- tab
+  ["n"] = "\n", -- linefeed
+  -- ["v"] = "",   -- verticaltab
+  -- ["f"] = "",   -- formfeed
+  -- ["r"] = "",   -- carriagereturn
+  -- ["e"] = "",   -- escape
+  -- [" "] = "",   -- space
+  ['"'] = "\"", -- doublequote
+  -- ["/"] = "",   -- slash
+  ["\\"]  = "\\", -- backslash
+  -- ["N"] = "",   -- nextline
+  -- ["_"] = "",   -- nonbreakingspace
+  -- ["L"] = "",   -- lineseparator
+  -- ["P"] = "",   -- paragraphseparator
+  -- ["x"] = "",   -- unicode8  (may be implemented at some point)
+  -- ["u"] = "",   -- unicode16
+  -- ["U"] = "",   -- unicode32
+}
+
+local ESCAPE = "\\"
+
+-- Return the character or INDICATORS.EOF at index
 local function peek(s, i)
-  return s:sub(i, i)
+  local ch = s:sub(i, i)
+  if #ch == 0 then
+    return INDICATORS.EOF
+  else
+    return ch
+  end
 end
 
 -- Advance index to the next non-empty line; return the rest of the current
@@ -59,30 +115,6 @@ local function trim_trailing(s)
   return s:sub(1, i - 1)
 end
 
--- Table of recognised YAML indicators; anything commented out is recognised in
--- YAML but not by this parser
-local INDICATORS = {
-  EOF = -1,
-  EOL = "\n",
-  COMMENT = "#",
-  SINGLE_QUOTE = "'",
-  DOUBLE_QUOTE = '"',
-  -- LITERAL = "|",
-  FOLDED = ">",
-  -- CHOMP_STRIP = "-",
-  -- CHOMP_KEEP = "+",
-  SEQ = "-",
-  -- MAP_KEY = "?",
-  MAP_VALUE = ":",
-  SEQ_BEGIN = "[",
-  SEQ_END = "]",
-  MAP_BEGIN = "{",
-  MAP_END = "}",
-  COLLECT = ",",
-  ANCHOR = "&",
-  ALIAS = "*",
-}
-
 local TokenType = enum{
   "Indent",
   "DocumentEnd",
@@ -97,18 +129,22 @@ local TokenType = enum{
   "Collect",
   "Anchor",
   "Alias",
+  "Seq",
+  "PlainScalar",
+  "UnescapedScalar",
+  "EscapedScalar",
 }
 
 local TokeniserState = enum{
   "Finished",
-  "EmitIndent",
-  "FindTokenStart",
-  "FindUnescapedFlowScalarEnd",
-  "FindEscapedFlowScalarEnd",
-  "EmitIndentForFoldedScalar",
-  "EmitSeqOrFallback",
-  "FindTokenStartInFlow",
-  "FindPlainScalarEnd"
+  "EmitBlockIndent",
+  "FindBlockTokenStart",
+  "FindBlockUnescapedScalarEnd",
+  "FindBlockEscapedScalarEnd",
+  "FindBlockPlainScalarEnd",
+  "FindBlockAnchorName",
+  "EmitBlockSingleQuote",
+  "EmitBlockDoubleQuote",
 }
 
 if DEBUG then
@@ -145,21 +181,14 @@ local Tokeniser = {}
 function Tokeniser:new(s)
   local ret = {
     source = s,
-    state = TokeniserState.EmitIndent,
+    state = TokeniserState.EmitBlockIndent,
     index = 1,
     line = { nr = 1, index = 0 },
-    fallback_stack = {},
     accumulator = "",
+    acc_line = { nr = 1, col = 1 },
   }
   setmetatable(ret, {__index = self})
   return ret
-end
-
--- Indicate start of a new line, with index pointing to the first character of
--- the new line
-function Tokeniser:_line_start_at(index)
-  self.line.nr = self.line.nr + 1
-  self.line.index = index - 1
 end
 
 -- Return the line, col position of the Tokeniser in the source
@@ -167,13 +196,16 @@ function Tokeniser:position()
   return self.line.nr, self.index - self.line.index
 end
 
--- Set the Tokeniser state to Finished and return a token with error type and
--- the received message
-function Tokeniser:emit_error_token(msg)
-  local msg = msg or ""
+-- Return the line, col of the save accumulator position
+function Tokeniser:accumulator_position()
+  return self.acc_line.nr, self.acc_line.col
+end
+
+-- Initialise accumulator to received value
+function Tokeniser:set_accumulator(value)
   local line, col = self:position()
-  self.state = TokeniserState.Finished
-  return { type = TokenType.Error, text = msg, line = line, col = col }
+  self.acc_line = { nr = line, col = col }
+  self.accumulator = value
 end
 
 -- Return a new token of type `type` with optional values
@@ -182,180 +214,219 @@ end
 -- not provided
 function Tokeniser:emit_token(type_, vars)
   assert(type_, "Not a member of TokenType")
-  local vars = vars or {}
-
-  if DEBUG and type(vars) ~= "table" then
-    print(string.format("vars: %s", vars))
-  end
-
-  local ret = { type = type_ }
-  for k,v in pairs(vars) do
-    ret[k] = v
-  end
-
-  ret.text = ret.text or ""
-  return ret
+  local token = vars or {}
+  token.type = type_
+  token.text = token.text or ""
+  return token
 end
 
+SIMPLE_TOKEN_MAP = {
+  [INDICATORS.SINGLE_QUOTE] = TokenType.SingleQuote,
+  [INDICATORS.DOUBLE_QUOTE] = TokenType.DoubleQuote,
+  [INDICATORS.FOLDED]       = TokenType.Folded,
+  [INDICATORS.SEQ]          = TokenType.Seq,
+  [INDICATORS.MAP_VALUE]    = TokenType.MapValue,
+  [INDICATORS.SEQ_BEGIN]    = TokenType.SeqBegin,
+  [INDICATORS.SEQ_END]      = TokenType.SeqEnd,
+  [INDICATORS.MAP_BEGIN]    = TokenType.MapBegin,
+  [INDICATORS.MAP_END]      = TokenType.MapEnd,
+  [INDICATORS.COLLECT]      = TokenType.Collect,
+  [INDICATORS.ANCHOR]       = TokenType.Anchor,
+  [INDICATORS.ALIAS]        = TokenType.Alias,
+}
+
+-- Return a token representing a special character with optional values
+function Tokeniser:emit_character_token(ch, vars)
+  local type_ = SIMPLE_TOKEN_MAP[ch]
+  if DEBUG and not type_ then error(string.format("Unrecognised special character: '%s'", ch)) end
+  local vars = vars or {}
+  vars.text = ch
+  return self:emit_token(type_, vars)
+end
+
+-- Return true if the tokeniser is finished, otherwise return false
+function Tokeniser:is_finished()
+  return self.state == TokeniserState.Finished
+end
+
+-- Set the tokeniser state to next_state
 function Tokeniser:transition_state(next_state)
   assert(next_state, "Not a member of TokeniserState")
   self.state = next_state
 end
 
--- Set the tokeniser state to `next_state`, then return a new token of type
--- `type` with optional values
---
--- Note: the text key of the returned table is defaulted to an empty string if
--- not provided
-function Tokeniser:set_emit_type_and_transition_state_and_emit_token(type_, next_state, vars)
-  self:transition_state(next_state)
-  return self:emit_token(type_, vars)
-end
-
--- Set the tokeniser state to `next_state`, then return a new token of type
--- `type` with optional values
---
--- Note: the text key of the returned table is defaulted to an empty string if
--- not provided
-function Tokeniser:transition_state_and_emit_token(next_state, type_, vars)
-  self:transition_state(next_state)
-  return self:emit_token(type_, vars)
-end
-
--- Create fallback point for backtracking state but not the accumulator
-function Tokeniser:create_fallback()
-  table.insert(self.fallback_stack, self.state)
-end
-
--- Create fallback point for backtracking state to explicit state
-function Tokeniser:create_fallback_to_state(state)
-  assert(state)
-  table.insert(self.fallback_stack, state)
-end
-
--- Remove last fallback point
-function Tokeniser:remove_fallback()
-  table.remove(self.fallback_stack)
-end
-
--- Pop fallback pop for backtracking state but not the accumulator
-function Tokeniser:fall_back()
-  self.state = table.remove(self.fallback_stack)
-end
-
 function Tokeniser:next()
   local ch = peek(self.source, self.index)
-  if #ch == 0 then
-    ch = INDICATORS.EOF
-  end
-
   if self.state == TokeniserState.Finished then
     return nil
 
-  elseif self.state == TokeniserState.EmitIndent then
+  elseif self.state == TokeniserState.EmitBlockIndent then
     local line, _ = self:position()
     local new_index = consume_indent(self.source, self.index)
     local indent = new_index - self.index
     self.index = new_index
-    return self:transition_state_and_emit_token(TokeniserState.FindTokenStart, TokenType.Indent, { index =  indent, line = line })
+    self:transition_state(TokeniserState.FindBlockTokenStart)
+    return self:emit_token(TokenType.Indent, { indent = indent, line = line })
 
-  elseif self.state == TokeniserState.FindTokenStart then
+  elseif self.state == TokeniserState.FindBlockTokenStart then
+    local lookahead = peek(self.source, self.index + 1)
     if ch == INDICATORS.EOF then
       self:transition_state(TokeniserState.Finished)
       return self:emit_token(TokenType.DocumentEnd)
 
     elseif ch == INDICATORS.EOL then
       self.index = self.index + 1
-      self:transition_state(TokeniserState.EmitIndent)
+      self:transition_state(TokeniserState.EmitBlockIndent)
       return self:next()
 
     elseif ch == INDICATORS.COMMENT then
       self.index = consume_line(self.source, self.index)
-      self:transition_state(TokeniserState.EmitIndent)
+      self:transition_state(TokeniserState.EmitBlockIndent)
       return self:next()
 
     elseif ch == INDICATORS.SINGLE_QUOTE then
       local line, col = self:position()
       self.index = self.index + 1
-      self:transition_state(TokeniserState.FindUnescapedFlowScalarEnd)
-      return self:emit_token(TokenType.SingleQuote, { text = INDICATORS.SINGLE_QUOTE, line = line, col = col })
+      self:set_accumulator("")
+      self:transition_state(TokeniserState.FindBlockUnescapedScalarEnd)
+      return self:emit_character_token(ch, { line = line, col = col })
 
     elseif ch == INDICATORS.DOUBLE_QUOTE then
       local line, col = self:position()
       self.index = self.index + 1
-      self:transition_state(TokeniserState.FindEscapedFlowScalarEnd)
-      return self:emit_token(TokenType.DoubleQuote, { text = INDICATORS.DOUBLE_QUOTE, line = line, col = col })
+      self:set_accumulator("")
+      self:transition_state(TokeniserState.FindBlockEscapedScalarEnd)
+      return self:emit_character_token(ch, { line = line, col = col })
 
-    elseif ch == INDICATORS.FOLDED then
+    elseif ch == INDICATORS.SEQ and lookahead == " " then
+      local line, col = self:position()
+      self.index = self.index + 2
+      return self:emit_character_token(ch, { line = line, col = col })
+
+    elseif ch == INDICATORS.ANCHOR or ch == INDICATORS.ALIAS then
       local line, col = self:position()
       self.index = self.index + 1
-      self:transition_state(TokeniserState.EmitIndentForFoldedScalar)
-      return self:emit_token(TokenType.Folded, { text = INDICATORS.FOLDED, line = line, col = col })
+      self:transition_state(TokeniserState.FindBlockAnchorName)
+      return self.emit_character_token(ch, { line = line, col = col })
 
-    elseif ch == INDICATORS.SEQ then
+    elseif ch == INDICATORS.SEQ_BEGIN or ch == INDICATORS.MAP_BEGIN or ch == INDICATORS.FOLDED or ch == INDICATORS.MAP_VALUE or ch == INDICATORS.SEQ_END or ch == INDICATORS.MAP_END or ch == INDICATORS.COLLECT then
       local line, col = self:position()
       self.index = self.index + 1
-      self:transition_state(TokeniserState.EmitSeqOrFallback)
-      return self:next()
-
-    elseif ch == INDICATORS.MAP_VALUE then
-      local line, col = self:position()
-      self.index = self.index + 1
-      return self:emit_token(TokenType.MapValue, { text = INDICATORS.MAP_VALUE, line = line, col = col })
-
-    elseif ch == INDICATORS.SEQ_BEGIN then
-      local line, col = self:position()
-      self.index = self.index + 1
-      self:transition_state(TokeniserState.FindTokenStartInFlow)
-      return self:emit_token(TokenType.SeqBegin, { text = INDICATORS.SEQ_BEGIN, line = line, col = col })
-
-    elseif ch == INDICATORS.SEQ_END then
-      local line, col = self:position()
-      self.index = self.index + 1
-      return self:emit_token(TokenType.SeqEnd, { text = INDICATORS.SEQ_END, line = line, col = col })
-
-    elseif ch == INDICATORS.MAP_BEGIN then
-      local line, col = self.position()
-      self.index = self.index + 1
-      self:transition_state(TokeniserState.FindTokenStartInFlow)
-      return self:emit_token(TokenType.MapBegin, { text = INDICATORS.MAP_BEGIN, line = line, col = col })
-
-    elseif ch == INDICATORS.MAP_END then
-      local line, col = self:position()
-      self.index = self.index + 1
-      return self:emit_token(TokenType.MapEnd, { text = INDICATORS.MAP_END, line = line, col = col })
-
-    elseif ch == INDICATORS.COLLECT then
-      local line, col = self:position()
-      self.index = self.index + 1
-      return self:emit_token(TokenType.Collect, { text = INDICATORS.COLLECT, line = line, col = col })
-
-    elseif ch == INDICATORS.ANCHOR then
-      local line, col = self:position()
-      self.index = self.index + 1
-      return self:emit_token(TokenType.Anchor, { text = INDICATORS.ANCHOR, line = line, col = col })
-
-    elseif ch == INDICATORS.ALIAS then
-      local line, col = self:position()
-      self.index = self.index + 1
-      return self:emit_token(TokenType.Alias, { text = INDICATORS.ALIAS, line = line, col = col })
+      return self:emit_character_token(ch, { line = line, col = col })
 
     elseif ch == " " or ch == "\t" then
       self.index = self.index + 1
       return self:next()
 
     else
-      self.accumulator = ch
+      self:set_accumulator(ch)
       self.index = self.index + 1
-      self:transition_state(TokeniserState.FindPlainScalarEnd)
+      self:transition_state(TokeniserState.FindBlockPlainScalarEnd)
       return self:next()
     end
 
-    if DEBUG then assert(false, "Unreachable") end
+  elseif self.state == TokeniserState.FindBlockPlainScalarEnd then
+    if ch == INDICATORS.EOF or ch == INDICATORS.EOL or ch == INDICATORS.COMMENT or ch == INDICATORS.DOUBLE_QUOTE or ch == INDICATORS.MAP_VALUE or ch == INDICATORS.SEQ_BEGIN or ch == INDICATORS.SEQ_END or ch == INDICATORS.MAP_BEGIN or ch == INDICATORS.MAP_END or ch == INDICATORS.ANCHOR or ch == INDICATORS.ALIAS then
+      local line, col = self:accumulator_position()
+      local text = trim_trailing(self.accumulator)
+      self:transition_state(TokeniserState.FindBlockTokenStart)
+      return self:emit_token(TokenType.PlainScalar, { text = text, line = line, col = col })
 
-  else
-    assert(false, "Unreachable")
+    else
+      self.accumulator = self.accumulator .. ch
+      self.index = self.index + 1
+      return self:next()
+    end
+
+  elseif self.state == TokeniserState.FindBlockUnescapedScalarEnd then
+    local lookahead = peek(self.source, self.index + 1)
+    if ch == INDICATORS.EOF then
+      local line, col = self:accumulator_position()
+      self:transition_state(TokeniserState.FindBlockTokenStart)
+      return self:emit_token(TokenType.UnescapedScalar, { text = self.accumulator, line = line, col = col })
+
+    elseif ch == INDICATORS.EOL and lookahead == INDICATORS.EOL then
+      self.index = self.index + 2
+      self.accumulator = self.accumulator .. "\n"
+      return self:next()
+
+    elseif ch == INDICATORS.EOL then
+      self.index = self.index + 1
+      self.accumulator = self.accumulator .. " "
+      return self:next()
+
+    elseif ch == INDICATORS.SINGLE_QUOTE and lookahead == INDICATORS.SINGLE_QUOTE then
+      self.index = self.index + 2
+      self.accumulator = self.accumulator .. "'"
+      return self:next()
+
+    elseif ch == INDICATORS.SINGLE_QUOTE then
+      local line, col = self:accumulator_position()
+      self:transition_state(TokeniserState.EmitBlockSingleQuote)
+      return self:emit_token(TokenType.UnescapedScalar, { text = self.accumulator, line = line, col = col })
+
+    else
+      self.accumulator = self.accumulator .. ch
+      self.index = self.index + 1
+      return self:next()
+    end
+
+  elseif self.state == TokeniserState.EmitBlockSingleQuote then
+    local line, col = self:position()
+    self.index = self.index + 1
+    self:transition_state(TokeniserState.FindBlockTokenStart)
+    return self:emit_character_token(INDICATORS.SINGLE_QUOTE, { line = line, col = col })
+
+  elseif self.state == TokeniserState.FindBlockEscapedScalarEnd then
+    local lookahead = peek(self.source, self.index + 1)
+    if nil then
+    elseif ch == INDICATORS.EOF then
+      local line, col = self:accumulator_position()
+      self:transition_state(TokeniserState.FindBlockTokenStart)
+      return self:emit_token(TokenType.EscapedScalar, { text = self.accumulator, line = line, col = col })
+
+    elseif ch == INDICATORS.EOL and lookahead == INDICATORS.EOL then
+      self.index = self.index + 2
+      self.accumulator = self.accumulator .. "\n"
+      return self:next()
+
+    elseif ch == INDICATORS.EOL then
+      self.index = self.index + 1
+      self.accumulator = self.accumulator .. " "
+      return self:next()
+
+    elseif ch == INDICATORS.DOUBLE_QUOTE then
+      local line, col = self:accumulator_position()
+      self:transition_state(TokeniserState.EmitBlockDoubleQuote)
+      return self:emit_token(TokenType.EscapedScalar, { text = self.accumulator, line = line, col = col })
+
+    elseif ch == ESCAPE and lookahead == INDICATORS.EOF then
+      local line, col = self:position()
+      error(string.format("Lone escape character at end-of-file: line %d, col %d", line, col))
+
+    elseif ch == ESCAPE then
+      local escaped = ESCAPES[lookahead]
+      if not escaped then local line, col = self:position(); error(string.format("Unrecognised escape character \\%s: line %d, col %d", lookahead, line, col)) end
+      self.index = self.index + 2
+      self.accumulator = self.accumulator .. escaped
+      return self:next()
+
+    else
+      self.index = self.index + 1
+      self.accumulator = self.accumulator .. ch
+      return self:next()
+    end
+
+  elseif self.state == TokeniserState.EmitBlockDoubleQuote then
+    local line, col = self:position()
+    self.index = self.index + 1
+    self:transition_state(TokeniserState.FindBlockTokenStart)
+    return self:emit_character_token(INDICATORS.DOUBLE_QUOTE, { line = line, col = col })
+
+  elseif self.state == TokeniserState.FindBlockAnchorName then
   end
+
+  if DEBUG then assert(false, "Unreachable") end
 end
 
 M.Tokeniser = Tokeniser
