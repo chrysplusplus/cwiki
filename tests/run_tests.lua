@@ -18,17 +18,21 @@ for _, module_info in ipairs(test_modinfos) do
     if k:find("^test_") then
       local test_name = string.format("%s.%s", module_info.name, k)
       all_tests[test_name] = v
+      table.insert(all_tests, test_name)
     end
   end
 end
 
+table.sort(all_tests)
+
 io.stdout:write("Running tests:\n")
 
 run = common.new_testrun()
-for name, fn in pairs(all_tests) do
-  common.start_test(run, name)
-  local status, err = pcall(fn, run)
-  io.stdout:write(".")
+for _, testname in ipairs(all_tests) do
+  local testfn = all_tests[testname]
+  assert(testfn)
+  common.start_test(run, testname)
+  local status, err = pcall(testfn, run)
   if not status then
     common.report_fail(run, err)
   end
