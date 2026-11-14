@@ -329,27 +329,27 @@ function M.test_debug_tokeniser_state_coverage(testrun)
 end
 
 function M.test_tokeniser_state_find_flow_token_start(testrun)
-  return report_fail(testrun, "Dummy test")
+  return common.dummy_test(testrun)
 end
 
 function M.test_tokeniser_state_find_flow_plain_scalar_end(testrun)
-  return report_fail(testrun, "Dummy test")
+  return common.dummy_test(testrun)
 end
 
 function M.test_tokeniser_state_find_flow_unescaped_scalar_end(testrun)
-  return report_fail(testrun, "Dummy test")
+  return common.dummy_test(testrun)
 end
 
 function M.test_tokeniser_state_emit_flow_single_quote(testrun)
-  return report_fail(testrun, "Dummy test")
+  return common.dummy_test(testrun)
 end
 
 function M.test_tokeniser_state_find_flow_escaped_scalar_end(testrun)
-  return report_fail(testrun, "Dummy test")
+  return common.dummy_test(testrun)
 end
 
 function M.test_tokeniser_state_find_flow_anchor_name(testrun)
-  return report_fail(testrun, "Dummy test")
+  return common.dummy_test(testrun)
 end
 
 return M

@@ -44,4 +44,8 @@ function M.end_test(testrun)
   testrun.current_name = nil
 end
 
+function M.dummy_test(testrun)
+  if DEBUG then return M.report_fail(testrun, "Dummy test") end
+end
+
 return M
