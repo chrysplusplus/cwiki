@@ -313,4 +313,28 @@ function M.test_bad_anchor_name_tokens(testrun)
   return test_result(testrun, status, msg)
 end
 
+function M.test_tokeniser_state_find_flow_token_start(testrun)
+  return report_fail(testrun, "Dummy test")
+end
+
+function M.test_tokeniser_state_find_flow_plain_scalar_end(testrun)
+  return report_fail(testrun, "Dummy test")
+end
+
+function M.test_tokeniser_state_find_flow_unescaped_scalar_end(testrun)
+  return report_fail(testrun, "Dummy test")
+end
+
+function M.test_tokeniser_state_emit_flow_single_quote(testrun)
+  return report_fail(testrun, "Dummy test")
+end
+
+function M.test_tokeniser_state_find_flow_escaped_scalar_end(testrun)
+  return report_fail(testrun, "Dummy test")
+end
+
+function M.test_tokeniser_state_find_flow_anchor_name(testrun)
+  return report_fail(testrun, "Dummy test")
+end
+
 return M

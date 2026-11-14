@@ -158,6 +158,12 @@ local TokeniserState = enum{
   "FindBlockAnchorName",
   "EmitBlockSingleQuote",
   "EmitBlockDoubleQuote",
+  "FindFlowTokenStart",
+  "FindFlowUnescapedScalarEnd",
+  "FindFlowEscapedScalarEnd",
+  "FindFlowPlainScalarEnd",
+  "FindFlowAnchorName",
+  "EmitFlowSingleQuote",
 }
 
 if DEBUG then
@@ -266,6 +272,16 @@ end
 function Tokeniser:transition_state(next_state)
   assert(next_state, "Not a member of TokeniserState")
   self.state = next_state
+end
+
+-- Set the tokeniser to a block context
+function Tokeniser:use_block_context()
+  self.state = TokeniserState.FindBlockTokenStart
+end
+
+-- Set the tokeniser to a flow context
+function Tokeniser:use_flow_context()
+  self.state = TokeniserState.FindFlowTokenStart
 end
 
 function Tokeniser:next()
@@ -441,6 +457,150 @@ function Tokeniser:next()
     local anchor_name
     self.index, anchor_name = consume_anchor_name(self.source, self.index)
     self:transition_state(TokeniserState.FindBlockTokenStart)
+    if not anchor_name then return self:next() end
+    return self:emit_token(TokenType.AnchorName, { text = anchor_name, line = line, col = col })
+
+  elseif self.state == TokeniserState.FindFlowTokenStart then
+    if nil then
+    elseif ch == INDICATORS.EOF then
+      self:transition_state(TokeniserState.Finished)
+      return self:emit_token(TokenType.DocumentEnd)
+
+    elseif ch == INDICATORS.EOL or ch == " " or ch == "\t" then
+      self.index = self.index + 1
+      return self:next()
+
+    elseif ch == INDICATORS.COMMENT then
+      self.index = consume_line(self.source, self.index)
+      return self:next()
+
+    elseif ch == INDICATORS.SINGLE_QUOTE then
+      local line, col = self:position()
+      self.index = self.index + 1
+      self:transition_state(TokeniserState.FindFlowUnescapedScalarEnd)
+      return self:emit_character_token(ch, { line = line, col = col })
+
+    elseif ch == INDICATORS.DOUBLE_QUOTE then
+      local line, col = self:position()
+      self.index = self.index + 1
+      self:transition_state(TokeniserState.FindFlowEscapedScalarEnd)
+      return self:emit_character_token(ch, { line = line, col = col })
+
+    elseif ch == INDICATORS.FOLDED or ch == INDICATORS.SEQ or ch == INDICATORS.MAP_VALUE or ch == INDICATORS.SEQ_BEGIN or ch == INDICATORS.SEQ_END or ch == INDICATORS.MAP_BEGIN or ch == INDICATORS.MAP_END or ch == INDICATORS.COLLECT then
+      local line, col = self:position()
+      self.index = self.index + 1
+      return self:emit_character_token(ch, { line = line, col = col })
+
+    elseif ch == INDICATORS.ANCHOR or ch == INDICATORS.ALIAS then
+      local line, col = self:position()
+      self.index = self.index + 1
+      self:transition_state(TokeniserState.FindFlowAnchorName)
+      return self:emit_character_token(ch, { line = line, col = col })
+
+    else
+      self:set_accumulator(ch)
+      self.index = self.index + 1
+      self:transition_state(TokeniserState.FindFlowPlainScalarEnd)
+      return self:next()
+    end
+
+  elseif self.state == TokeniserState.FindFlowPlainScalarEnd then
+    if ch == INDICATORS.EOF or ch == INDICATORS.EOL or ch == INDICATORS.COMMENT or ch == INDICATORS.DOUBLE_QUOTE or ch == INDICATORS.MAP_VALUE or ch == INDICATORS.SEQ_BEGIN or ch == INDICATORS.SEQ_END or ch == INDICATORS.MAP_BEGIN or ch == INDICATORS.MAP_END or ch == INDICATORS.COLLECT or ch == INDICATORS.ANCHOR or ch == INDICATORS.ALIAS then
+      local line, col = self:accumulator_position()
+      local text = trim_trailing(self.accumulator)
+      self:transition_state(TokeniserState.FindFlowTokenStart)
+      return self:emit_token(TokenType.PlainScalar, { text = text, line = line, col = col })
+
+    else
+      self.accumulator = self.accumulator .. ch
+      self.index = self.index + 1
+      return self:next()
+    end
+
+  elseif self.state == TokeniserState.FindFlowUnescapedScalarEnd then
+    local lookahead = peek(self.source, self.index + 1)
+    if ch == INDICATORS.EOF then
+      local line, col = self:accumulator_position()
+      self:transition_state(TokeniserState.FindFlowTokenStart)
+      return self:emit_token(TokenType.UnescapedScalar, { text = self.accumulator, line = line, col = col })
+
+    elseif ch == INDICATORS.EOL and lookahead == INDICATORS.EOL then
+      self.index = self.index + 2
+      self.accumulator = self.accumulator .. "\n"
+      return self:next()
+
+    elseif ch == INDICATORS.EOL then
+      self.index = self.index + 1
+      self.accumulator = self.accumulator .. " "
+      return self:next()
+
+    elseif ch == INDICATORS.SINGLE_QUOTE and lookahead == INDICATORS.SINGLE_QUOTE then
+      self.index = self.index + 2
+      self.accumulator = self.accumulator .. "'"
+      return self:next()
+
+    elseif ch == INDICATORS.SINGLE_QUOTE then
+      local line, col = self:accumulator_position()
+      self:transition_state(TokeniserState.EmitFlowSingleQuote)
+      return self:emit_token(TokenType.UnescapedScalar, { text = self.accumulator, line = line, col = col })
+
+    else
+      self.accumulator = self.accumulator .. ch
+      self.index = self.index + 1
+      return self:next()
+    end
+
+  elseif self.state == TokeniserState.EmitFlowSingleQuote then
+    local line, col = self:position()
+    self.index = self.index + 1
+    self:transition_state(TokeniserState.FindFlowTokenStart)
+    return self:emit_character_token(INDICATORS.SINGLE_QUOTE, { line = line, col = col })
+
+  elseif self.state == TokeniserState.FindFlowEscapedScalarEnd then
+    local lookahead = peek(self.source, self.index + 1)
+    if nil then
+    elseif ch == INDICATORS.EOF then
+      local line, col = self:accumulator_position()
+      self:transition_state(TokeniserState.FindFlowTokenStart)
+      return self:emit_token(TokenType.EscapedScalar, { text = self.accumulator, line = line, col = col })
+
+    elseif ch == INDICATORS.EOL and lookahead == INDICATORS.EOL then
+      self.index = self.index + 2
+      self.accumulator = self.accumulator .. "\n"
+      return self:next()
+
+    elseif ch == INDICATORS.EOL then
+      self.index = self.index + 1
+      self.accumulator = self.accumulator .. " "
+      return self:next()
+
+    elseif ch == INDICATORS.DOUBLE_QUOTE then
+      local line, col = self:accumulator_position()
+      self:transition_state(TokeniserState.EmitFlowDoubleQuote)
+      return self:emit_token(TokenType.EscapedScalar, { text = self.accumulator, line = line, col = col })
+
+    elseif ch == ESCAPE and lookahead == INDICATORS.EOF then
+      local line, col = self:position()
+      error(string.format("Lone escape character at end-of-file: line %d, col %d", line, col))
+
+    elseif ch == ESCAPE then
+      local escaped = ESCAPES[lookahead]
+      if not escaped then local line, col = self:position(); error(string.format("Unrecognised escape character \\%s: line %d, col %d", lookahead, line, col)) end
+      self.index = self.index + 2
+      self.accumulator = self.accumulator .. escaped
+      return self:next()
+
+    else
+      self.index = self.index + 1
+      self.accumulator = self.accumulator .. ch
+      return self:next()
+    end
+
+  elseif self.state == TokeniserState.FindFlowAnchorName then
+    local line, col = self:position()
+    local anchor_name
+    self.index, anchor_name = consume_anchor_name(self.source, self.index)
+    self:transition_state(TokeniserState.FindFlowTokenStart)
     if not anchor_name then return self:next() end
     return self:emit_token(TokenType.AnchorName, { text = anchor_name, line = line, col = col })
   end
