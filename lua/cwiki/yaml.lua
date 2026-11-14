@@ -192,6 +192,8 @@ if DEBUG then
 
     print(string.format("{ %s }", table.concat(keyvals, ", ")))
   end
+
+  M.TokeniserState = TokeniserState
 end
 
 -- Tokeniser objects represent a generator that emits a sequence of lexical

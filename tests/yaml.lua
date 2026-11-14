@@ -7,6 +7,8 @@ local report_fail = common.report_fail
 local yaml = require("cwiki.yaml")
 local TokenType = yaml.TokenType
 
+local util = require("cwiki.util")
+
 local M = {}
 
 -- Check structed of received tokens matches expected; return "pass" or "fail"
@@ -311,6 +313,19 @@ function M.test_bad_anchor_name_tokens(testrun)
   local tokens = generate_tokens("&6anchor", 4)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
+end
+
+function M.test_debug_tokeniser_state_coverage(testrun)
+  if not DEBUG then return end
+  for state = 1, util.enum_max(yaml.TokeniserState) do
+    local tokeniser = yaml.Tokeniser:new ""
+    tokeniser.state = state
+    local status, _ = pcall(tokeniser.next, tokeniser)
+    if not status then
+      return report_fail(testrun, string.format("Missing coverage for %s", util.enum_to_string(yaml.TokeniserState, state)))
+    end
+  end
+  return report_pass(testrun)
 end
 
 function M.test_tokeniser_state_find_flow_token_start(testrun)
