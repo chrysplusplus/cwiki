@@ -45,7 +45,7 @@ function M.end_test(testrun)
 end
 
 function M.dummy_test(testrun)
-  if DEBUG then return M.report_fail(testrun, "Dummy test") end
+  if DEBUG and DUMMY then return M.report_fail(testrun, "Dummy test") end
 end
 
 return M

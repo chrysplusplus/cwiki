@@ -10,6 +10,7 @@ Run the tests!
 Available options:
     -h, --help     : Print this message
         --no-debug : Don't run debug tests
+        --no-dummy : Don't run dummy tests
 
 ]]
 
@@ -23,11 +24,14 @@ function info(...)
 end
 
 DEBUG = true
+DUMMY = true
 for i, a in ipairs(arg) do
   if a == "-h" or a == "--help" then
     usage()
   elseif a == "--no-debug" then
     DEBUG = false
+  elseif a == "--no-dummy" then
+    DUMMY = false
   else
     io.stdout:write(string.format("Unknown option: '%s'", a))
     usage(1)
