@@ -332,9 +332,11 @@ function M.test_debug_tokeniser_state_coverage(testrun)
   for state = 1, util.enum_max(yaml.TokeniserState) do
     local tokeniser = yaml.Tokeniser:new ""
     tokeniser.state = state
-    local status, _ = pcall(tokeniser.next, tokeniser)
-    if not status then
+    local status, err = pcall(tokeniser.next, tokeniser)
+    if not status and err:find("Unreachable") then
       return report_fail(testrun, string.format("Missing coverage for %s", util.enum_to_string(yaml.TokeniserState, state)))
+    elseif not status then
+      return report_fail(testrun, string.format("Error for %s: %s", util.enum_to_string(yaml.TokeniserState, state), err))
     end
   end
   return report_pass(testrun)
