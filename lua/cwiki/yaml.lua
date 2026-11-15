@@ -217,6 +217,12 @@ function Tokeniser:position()
   return self.line.nr, self.index - self.line.index
 end
 
+-- Signal new line
+function Tokeniser:newline()
+  self.line.nr = self.line.nr + 1
+  self.line.index = self.index - 1
+end
+
 -- Return the line, col of the save accumulator position
 function Tokeniser:accumulator_position()
   return self.acc_line.nr, self.acc_line.col
@@ -307,11 +313,13 @@ function Tokeniser:next()
 
     elseif ch == INDICATORS.EOL then
       self.index = self.index + 1
+      self:newline()
       self:transition_state(TokeniserState.EmitBlockIndent)
       return self:next()
 
     elseif ch == INDICATORS.COMMENT then
       self.index = consume_line(self.source, self.index)
+      self:newline()
       self:transition_state(TokeniserState.EmitBlockIndent)
       return self:next()
 
@@ -377,12 +385,16 @@ function Tokeniser:next()
       return self:emit_token(TokenType.UnescapedScalar, { text = self.accumulator, line = line, col = col })
 
     elseif ch == INDICATORS.EOL and lookahead == INDICATORS.EOL then
-      self.index = self.index + 2
+      self.index = self.index + 1
+      self:newline()
+      self.index = self.index + 1
+      self:newline()
       self.accumulator = self.accumulator .. "\n"
       return self:next()
 
     elseif ch == INDICATORS.EOL then
       self.index = self.index + 1
+      self:newline()
       self.accumulator = self.accumulator .. " "
       return self:next()
 
@@ -417,12 +429,16 @@ function Tokeniser:next()
       return self:emit_token(TokenType.EscapedScalar, { text = self.accumulator, line = line, col = col })
 
     elseif ch == INDICATORS.EOL and lookahead == INDICATORS.EOL then
-      self.index = self.index + 2
+      self.index = self.index + 1
+      self:newline()
+      self.index = self.index + 1
+      self:newline()
       self.accumulator = self.accumulator .. "\n"
       return self:next()
 
     elseif ch == INDICATORS.EOL then
       self.index = self.index + 1
+      self:newline()
       self.accumulator = self.accumulator .. " "
       return self:next()
 
@@ -468,12 +484,18 @@ function Tokeniser:next()
       self:transition_state(TokeniserState.Finished)
       return self:emit_token(TokenType.DocumentEnd)
 
-    elseif ch == INDICATORS.EOL or ch == " " or ch == "\t" then
+    elseif ch == " " or ch == "\t" then
       self.index = self.index + 1
+      return self:next()
+
+    elseif ch == INDICATORS.EOL then
+      self.index = self.index + 1
+      self:newline()
       return self:next()
 
     elseif ch == INDICATORS.COMMENT then
       self.index = consume_line(self.source, self.index)
+      self:newline()
       return self:next()
 
     elseif ch == INDICATORS.SINGLE_QUOTE then
@@ -529,12 +551,16 @@ function Tokeniser:next()
       return self:emit_token(TokenType.UnescapedScalar, { text = self.accumulator, line = line, col = col })
 
     elseif ch == INDICATORS.EOL and lookahead == INDICATORS.EOL then
-      self.index = self.index + 2
+      self.index = self.index + 1
+      self:newline()
+      self.index = self.index + 1
+      self:newline()
       self.accumulator = self.accumulator .. "\n"
       return self:next()
 
     elseif ch == INDICATORS.EOL then
       self.index = self.index + 1
+      self:newline()
       self.accumulator = self.accumulator .. " "
       return self:next()
 
@@ -575,12 +601,16 @@ function Tokeniser:next()
       return self:emit_token(TokenType.EscapedScalar, { text = self.accumulator, line = line, col = col })
 
     elseif ch == INDICATORS.EOL and lookahead == INDICATORS.EOL then
-      self.index = self.index + 2
+      self.index = self.index + 1
+      self:newline()
+      self.index = self.index + 1
+      self:newline()
       self.accumulator = self.accumulator .. "\n"
       return self:next()
 
     elseif ch == INDICATORS.EOL then
       self.index = self.index + 1
+      self:newline()
       self.accumulator = self.accumulator .. " "
       return self:next()
 
