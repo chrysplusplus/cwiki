@@ -171,7 +171,7 @@ function M.test_unescaped_scalar_with_one_newline_tokens(testrun)
     { text = "", indent = 0, line = 1, type = TokenType.Indent },
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 1 },
     { type = TokenType.UnescapedScalar, col = 2, text = "one two", line = 1 },
-    { type = TokenType.SingleQuote, text = "'", line = 1, col = 9 },
+    { type = TokenType.SingleQuote, text = "'", line = 2, col = 4 },
     { type = TokenType.DocumentEnd, text = "" },
   }
   local tokens = generate_block_tokens("'one\ntwo'", #expected)
@@ -184,7 +184,7 @@ function M.test_unescaped_scalar_with_multi_newline_tokens(testrun)
     { text = "", indent = 0, line = 1, type = TokenType.Indent },
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 1 },
     { type = TokenType.UnescapedScalar, col = 2, text = "one\ntwo", line = 1 },
-    { type = TokenType.SingleQuote, text = "'", line = 1, col = 10 },
+    { type = TokenType.SingleQuote, text = "'", line = 3, col = 4 },
     { type = TokenType.DocumentEnd, text = "" },
   }
   local tokens = generate_block_tokens("'one\n\ntwo'", #expected)
@@ -210,7 +210,7 @@ function M.test_escaped_scalar_with_multi_newline_tokens(testrun)
     { text = "", indent = 0, line = 1, type = TokenType.Indent },
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 1 },
     { type = TokenType.EscapedScalar, col = 2, text = "one\ntwo", line = 1 },
-    { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 10 },
+    { type = TokenType.DoubleQuote, text = "\"", line = 3, col = 4 },
     { type = TokenType.DocumentEnd, text = "" },
   }
   local tokens = generate_block_tokens('"one\n\ntwo"', #expected)
@@ -223,7 +223,7 @@ function M.test_escaped_scalar_with_one_newline_tokens(testrun)
     { text = "", indent = 0, line = 1, type = TokenType.Indent },
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 1 },
     { type = TokenType.EscapedScalar, col = 2, text = "one two", line = 1 },
-    { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 9 },
+    { type = TokenType.DoubleQuote, text = "\"", line = 2, col = 4 },
     { type = TokenType.DocumentEnd, text = "" },
   }
   local tokens = generate_block_tokens('"one\ntwo"', #expected)
@@ -350,8 +350,8 @@ end
 function M.test_flow_whitespace_tokens(testrun)
   local expected = {
     { type = TokenType.PlainScalar, text = "one", line = 1, col = 1 },
-    { type = TokenType.PlainScalar, text = "two", line = 1, col = 7 },
-    { type = TokenType.PlainScalar, text = "three", line = 1, col = 11 },
+    { type = TokenType.PlainScalar, text = "two", line = 3, col = 1 },
+    { type = TokenType.PlainScalar, text = "three", line = 4, col = 1 },
     { type = TokenType.DocumentEnd, text = "" },
   }
   local tokens = generate_flow_tokens("one\n\t\ntwo\nthree", #expected)
@@ -362,7 +362,7 @@ end
 function M.test_flow_comment_tokens(testrun)
   local expected = {
     { type = TokenType.PlainScalar, text = "one", line = 1, col = 1 },
-    { type = TokenType.PlainScalar, text = "two", line = 1, col = 15 },
+    { type = TokenType.PlainScalar, text = "two", line = 2, col = 1 },
     { type = TokenType.DocumentEnd, text = "" },
   }
   local tokens = generate_flow_tokens("one # comment\ntwo", #expected)
@@ -410,9 +410,9 @@ function M.test_flow_plain_scalar_tokens(testrun)
     { type = TokenType.EscapedScalar, text = "", line = 1, col = 54 },
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 54 },
     { type = TokenType.PlainScalar, text = "ten", line = 1, col = 56 },
-    { type = TokenType.PlainScalar, text = "eleven", line = 1, col = 69 },
-    { type = TokenType.PlainScalar, text = "twelve'", line = 1, col = 76 },
-    { type = TokenType.PlainScalar, text = "thirteen", line = 1, col = 84 },
+    { type = TokenType.PlainScalar, text = "eleven", line = 2, col = 1 },
+    { type = TokenType.PlainScalar, text = "twelve'", line = 3, col = 1 },
+    { type = TokenType.PlainScalar, text = "thirteen", line = 4, col = 1 },
     { type = TokenType.DocumentEnd, text = "" },
   }
   local tokens = generate_flow_tokens("one* two& three, four} five{ six] seven[ eight: nine\"\" ten# comment\neleven\ntwelve'\nthirteen", #expected)
@@ -430,12 +430,12 @@ function M.test_flow_unescaped_scalar_tokens(testrun)
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 13 },
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 15 },
     { type = TokenType.UnescapedScalar, text = "three next word", line = 1, col = 16 },
-    { type = TokenType.SingleQuote, text = "'", line = 1, col = 31 },
-    { type = TokenType.SingleQuote, text = "'", line = 1, col = 33 },
-    { type = TokenType.UnescapedScalar, text = "four\nnext line", line = 1, col = 34 },
-    { type = TokenType.SingleQuote, text = "'", line = 1, col = 49 },
-    { type = TokenType.SingleQuote, text = "'", line = 1, col = 51 },
-    { type = TokenType.UnescapedScalar, text = "five", line = 1, col = 52 },
+    { type = TokenType.SingleQuote, text = "'", line = 2, col = 10 },
+    { type = TokenType.SingleQuote, text = "'", line = 2, col = 12 },
+    { type = TokenType.UnescapedScalar, text = "four\nnext line", line = 2, col = 13 },
+    { type = TokenType.SingleQuote, text = "'", line = 4, col = 10 },
+    { type = TokenType.SingleQuote, text = "'", line = 4, col = 12 },
+    { type = TokenType.UnescapedScalar, text = "five", line = 4, col = 13 },
     { type = TokenType.DocumentEnd, text = "" },
   }
   local tokens = generate_flow_tokens("'one' 'two''' 'three\nnext word' 'four\n\nnext line' 'five", #expected)
@@ -450,12 +450,12 @@ function M.test_tokeniser_state_find_flow_escaped_scalar_end(testrun)
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 5 },
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 7 },
     { type = TokenType.EscapedScalar, text = "two next word", line = 1, col = 8 },
-    { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 21 },
-    { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 23 },
-    { type = TokenType.EscapedScalar, text = "three\nnext line", line = 1, col = 24 },
-    { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 40 },
-    { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 42 },
-    { type = TokenType.EscapedScalar, text = "four", line = 1, col = 43 },
+    { type = TokenType.DoubleQuote, text = "\"", line = 2, col = 10 },
+    { type = TokenType.DoubleQuote, text = "\"", line = 2, col = 12 },
+    { type = TokenType.EscapedScalar, text = "three\nnext line", line = 2, col = 13 },
+    { type = TokenType.DoubleQuote, text = "\"", line = 4, col = 10 },
+    { type = TokenType.DoubleQuote, text = "\"", line = 4, col = 12 },
+    { type = TokenType.EscapedScalar, text = "four", line = 4, col = 13 },
     { type = TokenType.DocumentEnd, text = "" },
   }
   local tokens = generate_flow_tokens('"one" "two\nnext word" "three\n\nnext line" "four', #expected)
