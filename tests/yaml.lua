@@ -81,10 +81,12 @@ end
 function M.test_comment_tokens(testrun)
   local expected = {
     { text = "", indent = 0, type = TokenType.Indent, line = 1 },
-    { text = "", indent = 0, type = TokenType.Indent, line = 1 },
+    { text = "one", type = TokenType.PlainScalar, line = 1, col = 1 },
+    { text = "", indent = 0, type = TokenType.Indent, line = 2 },
+    { text = "two", type = TokenType.PlainScalar, line = 2, col = 1 },
     { type = TokenType.DocumentEnd, text = "" }
   }
-  local tokens = generate_block_tokens("# comment", #expected)
+  local tokens = generate_block_tokens("one # comment\ntwo", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
