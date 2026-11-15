@@ -496,23 +496,23 @@ end
 function M.test_folded_scalar_tokens(testrun)
   local expected = {
     { type = TokenType.FoldIndent,  indent = 2,                              line = 1 },
-    { type = TokenType.FoldLine,    text = "line one",                       line = 1,  col = 3 },
+    { type = TokenType.FoldLine,    text = "line one.",                      line = 1,  col = 3 },
     { type = TokenType.FoldIndent,  indent = 2,                              line = 2 },
-    { type = TokenType.FoldLine,    text = "still line one",                 line = 2,  col = 3 },
+    { type = TokenType.FoldLine,    text = "still line one.",                line = 2,  col = 3 },
     { type = TokenType.FoldIndent,  indent = 0,                              line = 3 },
-    { type = TokenType.FoldNewline, text = "\n" },
+    { type = TokenType.FoldNewline },
     { type = TokenType.FoldIndent,  indent = 2,                              line = 4 },
-    { type = TokenType.FoldLine,    text = "line two",                       line = 4,  col = 3 },
+    { type = TokenType.FoldLine,    text = "line two.",                      line = 4,  col = 3 },
     { type = TokenType.FoldIndent,  indent = 4,                              line = 5 },
     { type = TokenType.FoldLine,    text = "still line two, despite indent", line = 5,  col = 5 },
     { type = TokenType.FoldIndent,  indent = 0,                              line = 6 },
-    { type = TokenType.FoldNewline, text = "\n" },
+    { type = TokenType.FoldNewline },
     { type = TokenType.FoldIndent,  indent = 4,                              line = 7 },
     { type = TokenType.FoldLine,    text = "line three, indented",           line = 7,  col = 5 },
     { type = TokenType.FoldIndent,  indent = 4,                              line = 8 },
     { type = TokenType.FoldLine,    text = "line four, indented",            line = 8,  col = 5 },
     { type = TokenType.FoldIndent,  indent = 0,                              line = 9 },
-    { type = TokenType.FoldNewline, text = "\n" },
+    { type = TokenType.FoldNewline },
     { type = TokenType.FoldIndent,  indent = 0,                              line = 10 },
     { type = TokenType.FoldLine,    text = "next scalar",                    line = 10, col = 1 },
     { type = TokenType.DocumentEnd },
@@ -527,7 +527,7 @@ function M.test_folded_scalar_empty_newline_ending_tokens(testrun)
     { type = TokenType.FoldIndent,  indent = 2,        line = 1 },
     { type = TokenType.FoldLine,    text = "line one", line = 1, col = 3 },
     { type = TokenType.FoldIndent,  indent = 0,        line = 2 },
-    { type = TokenType.FoldNewline, text = "\n" },
+    { type = TokenType.FoldNewline },
   }
   local tokens = generate_folded_tokens("  line one\n", #expected)
   local status, msg = check_tokens(expected, tokens)
