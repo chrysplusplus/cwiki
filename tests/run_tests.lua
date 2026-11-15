@@ -11,6 +11,7 @@ If specified, test is the fully-qualified name of the test to run. For failing t
 
 Available options:
     -h, --help     : Print this message
+        --trace    : Turn on line tracing (only for single tests)
         --no-debug : Don't run debug tests
         --no-dummy : Don't run dummy tests
 
@@ -28,6 +29,7 @@ end
 DEBUG = true
 DUMMY = true
 SINGLE_TEST = nil
+TRACE = false
 for i, a in ipairs(arg) do
   if a == "-h" or a == "--help" then
     usage()
@@ -35,6 +37,8 @@ for i, a in ipairs(arg) do
     DEBUG = false
   elseif a == "--no-dummy" then
     DUMMY = false
+  elseif a == "--trace" then
+    TRACE = true
   elseif a:find("^--?") then
     io.stdout:write(string.format("Unknown option: '%s'", a))
     usage(1)
@@ -43,6 +47,11 @@ for i, a in ipairs(arg) do
   else
     SINGLE_TEST = a
   end
+end
+
+if TRACE and not SINGLE_TEST then
+  io.stdout:write("--trace can only be set for single tests\n")
+  os.exit(1)
 end
 
 common = require("common")
@@ -81,6 +90,16 @@ function print_report(run, opts)
   end
 end
 
+function enable_trace()
+  debug.sethook(function (_, line)
+    print(string.format("%s:%s", debug.getinfo(2).short_src, line))
+  end, "l")
+end
+
+function disable_trace()
+  debug.sethook()
+end
+
 function run_all_tests()
   info("Running tests:\n")
   run = common.new_testrun()
@@ -112,7 +131,11 @@ function run_single_test()
 
   local run = common.new_testrun()
   common.start_test(run, SINGLE_TEST)
+
+  if TRACE then enable_trace() end
   local status, err = pcall(testfn, run)
+  if TRACE then disable_trace() end
+
   if not status then
     common.report_fail(run, err)
   end
