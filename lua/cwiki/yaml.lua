@@ -164,6 +164,7 @@ local TokeniserState = enum{
   "FindFlowPlainScalarEnd",
   "FindFlowAnchorName",
   "EmitFlowSingleQuote",
+  "EmitFlowDoubleQuote",
 }
 
 if DEBUG then
@@ -479,12 +480,14 @@ function Tokeniser:next()
     elseif ch == INDICATORS.SINGLE_QUOTE then
       local line, col = self:position()
       self.index = self.index + 1
+      self:set_accumulator("")
       self:transition_state(TokeniserState.FindFlowUnescapedScalarEnd)
       return self:emit_character_token(ch, { line = line, col = col })
 
     elseif ch == INDICATORS.DOUBLE_QUOTE then
       local line, col = self:position()
       self.index = self.index + 1
+      self:set_accumulator("")
       self:transition_state(TokeniserState.FindFlowEscapedScalarEnd)
       return self:emit_character_token(ch, { line = line, col = col })
 
@@ -557,6 +560,12 @@ function Tokeniser:next()
     self.index = self.index + 1
     self:transition_state(TokeniserState.FindFlowTokenStart)
     return self:emit_character_token(INDICATORS.SINGLE_QUOTE, { line = line, col = col })
+
+  elseif self.state == TokeniserState.EmitFlowDoubleQuote then
+    local line, col = self:position()
+    self.index = self.index + 1
+    self:transition_state(TokeniserState.FindFlowTokenStart)
+    return self:emit_character_token(INDICATORS.DOUBLE_QUOTE, { line = line, col = col })
 
   elseif self.state == TokeniserState.FindFlowEscapedScalarEnd then
     local lookahead = peek(self.source, self.index + 1)
