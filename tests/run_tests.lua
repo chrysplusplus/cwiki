@@ -4,8 +4,10 @@
 package.path = package.path .. ";./lua/?.lua;./lua/?/init.lua;./tests/?.lua;./tests/?/init.lua"
 
 USAGE = [[
-%s [options]
+%s [options] [test]
 Run the tests!
+
+If specified, test is the fully-qualified name of the test to run. For failing tests, this might display more information about why the test isn't passing, such as printing tracebacks at points of failure.
 
 Available options:
     -h, --help     : Print this message
@@ -25,6 +27,7 @@ end
 
 DEBUG = true
 DUMMY = true
+SINGLE_TEST = nil
 for i, a in ipairs(arg) do
   if a == "-h" or a == "--help" then
     usage()
@@ -32,9 +35,13 @@ for i, a in ipairs(arg) do
     DEBUG = false
   elseif a == "--no-dummy" then
     DUMMY = false
-  else
+  elseif a:find("^--?") then
     io.stdout:write(string.format("Unknown option: '%s'", a))
     usage(1)
+  elseif SINGLE_TEST then
+    io.stdout:write("Error: more than one test specified")
+  else
+    SINGLE_TEST = a
   end
 end
 
@@ -58,29 +65,64 @@ end
 
 table.sort(all_tests)
 
-info("Running tests:\n")
+NO_FILTER = "."
+FAIL_FILTER = "^fail$"
 
-run = common.new_testrun()
-run.hooks.on_pass = function (...) info(".") end
-run.hooks.on_fail = function (...) info("!") end
+function print_report(run, opts)
+  local opts = opts or {}
+  local filter = opts.filter or FAIL_FILTER
+  info("\nFinished!\n")
+  info(string.format("%d test(s) were run: %d PASSED, %d FAILED\n", run.total, run.passes, run.failures))
 
-for _, testname in ipairs(all_tests) do
-  local testfn = all_tests[testname]
-  assert(testfn)
-  common.start_test(run, testname)
+  for _, test_result in ipairs(run.tests) do
+    if test_result.status:find(filter) then
+      info(string.format("%s: status '%s'\n\t%s\n", test_result.name, test_result.status, test_result.message))
+    end
+  end
+end
+
+function run_all_tests()
+  info("Running tests:\n")
+  run = common.new_testrun()
+  run.hooks.on_pass = function (...) info(".") end
+  run.hooks.on_fail = function (...) info("!") end
+
+  for _, testname in ipairs(all_tests) do
+    local testfn = all_tests[testname]
+    assert(testfn)
+    common.start_test(run, testname)
+    local status, err = pcall(testfn, run)
+    if not status then
+      common.report_fail(run, err)
+    end
+    common.end_test(run)
+  end
+
+  print_report(run)
+end
+
+function run_single_test()
+  local testfn = all_tests[SINGLE_TEST]
+  if not testfn then
+    io.stdout:write(string.format("Unknown test: '%s'\n\n", SINGLE_TEST))
+    os.exit(1)
+  end
+
+  info(string.format("Running test %s:\n", SINGLE_TEST))
+
+  local run = common.new_testrun()
+  common.start_test(run, SINGLE_TEST)
   local status, err = pcall(testfn, run)
   if not status then
     common.report_fail(run, err)
   end
   common.end_test(run)
+  print_report(run, { filter = NO_FILTER })
 end
 
-info("\nFinished!\n")
-info(string.format("%d test(s) were run: %d PASSED, %d FAILED\n", run.total, run.passes, run.failures))
-
-for _, test_result in ipairs(run.tests) do
-  if test_result.status ~= "pass" then
-    info(string.format("%s: status '%s'\n\t%s\n", test_result.name, test_result.status, test_result.message))
-  end
+if SINGLE_TEST then
+  run_single_test()
+else
+  run_all_tests()
 end
 
