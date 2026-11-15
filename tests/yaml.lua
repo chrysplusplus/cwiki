@@ -82,7 +82,7 @@ end
 
 function M.test_empty_source_tokens(testrun)
   local expected = {
-    { text = "", indent = 0, type = TokenType.Indent, line = 1 },
+    { text = "", indent = 0, type = TokenType.BlockIndent, line = 1 },
     { type = TokenType.DocumentEnd, text = "" }
   }
   local tokens = generate_block_tokens("", #expected)
@@ -92,9 +92,9 @@ end
 
 function M.test_comment_tokens(testrun)
   local expected = {
-    { text = "", indent = 0, type = TokenType.Indent, line = 1 },
+    { text = "", indent = 0, type = TokenType.BlockIndent, line = 1 },
     { text = "one", type = TokenType.PlainScalar, line = 1, col = 1 },
-    { text = "", indent = 0, type = TokenType.Indent, line = 2 },
+    { text = "", indent = 0, type = TokenType.BlockIndent, line = 2 },
     { text = "two", type = TokenType.PlainScalar, line = 2, col = 1 },
     { type = TokenType.DocumentEnd, text = "" }
   }
@@ -105,7 +105,7 @@ end
 
 function M.test_plain_scalar(testrun)
   local expected = {
-    { text = "", indent = 0, type = TokenType.Indent, line = 1 },
+    { text = "", indent = 0, type = TokenType.BlockIndent, line = 1 },
     { line = 1, text = "test", type = TokenType.PlainScalar, col = 1 },
     { type = TokenType.DocumentEnd, text = "" },
   }
@@ -116,7 +116,7 @@ end
 
 function M.test_seq_single_entry_tokens(testrun)
   local expected = {
-    { text = "", indent = 0, type = TokenType.Indent, line = 1 },
+    { text = "", indent = 0, type = TokenType.BlockIndent, line = 1 },
     { line = 1, text = "-", type = TokenType.Seq, col = 1 },
     { line = 1, text = "entry", type = TokenType.PlainScalar, col = 3 },
     { type = TokenType.DocumentEnd, text = "" },
@@ -128,10 +128,10 @@ end
 
 function M.test_seq_multi_entry_tokens(testrun)
   local expected = {
-    { text = "", indent = 0, line = 1, type = TokenType.Indent },
+    { text = "", indent = 0, line = 1, type = TokenType.BlockIndent },
     { type = TokenType.Seq, text = "-", line = 1, col = 1 },
     { type = TokenType.PlainScalar, col = 3, text = "one", line = 1 },
-    { text = "", indent = 0, line = 2, type = TokenType.Indent },
+    { text = "", indent = 0, line = 2, type = TokenType.BlockIndent },
     { type = TokenType.Seq, text = "-", line = 2, col = 1 },
     { type = TokenType.PlainScalar, col = 3, text = "two", line = 2 },
     { type = TokenType.DocumentEnd, text = "" },
@@ -143,7 +143,7 @@ end
 
 function M.test_unescaped_scalar_tokens(testrun)
   local expected = {
-    { text = "", indent = 0, line = 1, type = TokenType.Indent },
+    { text = "", indent = 0, line = 1, type = TokenType.BlockIndent },
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 1 },
     { type = TokenType.UnescapedScalar, col = 2, text = "apple", line = 1 },
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 7 },
@@ -156,7 +156,7 @@ end
 
 function M.test_empty_unescaped_scalar_tokens(testrun)
   local expected = {
-    { text = "", indent = 0, line = 1, type = TokenType.Indent },
+    { text = "", indent = 0, line = 1, type = TokenType.BlockIndent },
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 1 },
     { type = TokenType.UnescapedScalar, col = 2, text = "", line = 1 },
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 2 },
@@ -169,7 +169,7 @@ end
 
 function M.test_unescaped_scalar_with_quote_tokens(testrun)
   local expected = {
-    { text = "", indent = 0, line = 1, type = TokenType.Indent },
+    { text = "", indent = 0, line = 1, type = TokenType.BlockIndent },
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 1 },
     { type = TokenType.UnescapedScalar, col = 2, text = "tom's ball", line = 1 },
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 13 },
@@ -182,7 +182,7 @@ end
 
 function M.test_unescaped_scalar_with_one_newline_tokens(testrun)
   local expected = {
-    { text = "", indent = 0, line = 1, type = TokenType.Indent },
+    { text = "", indent = 0, line = 1, type = TokenType.BlockIndent },
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 1 },
     { type = TokenType.UnescapedScalar, col = 2, text = "one two", line = 1 },
     { type = TokenType.SingleQuote, text = "'", line = 2, col = 4 },
@@ -195,7 +195,7 @@ end
 
 function M.test_unescaped_scalar_with_multi_newline_tokens(testrun)
   local expected = {
-    { text = "", indent = 0, line = 1, type = TokenType.Indent },
+    { text = "", indent = 0, line = 1, type = TokenType.BlockIndent },
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 1 },
     { type = TokenType.UnescapedScalar, col = 2, text = "one\ntwo", line = 1 },
     { type = TokenType.SingleQuote, text = "'", line = 3, col = 4 },
@@ -208,7 +208,7 @@ end
 
 function M.test_escaped_scalar_tokens(testrun)
   local expected = {
-    { text = "", indent = 0, line = 1, type = TokenType.Indent },
+    { text = "", indent = 0, line = 1, type = TokenType.BlockIndent },
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 1 },
     { type = TokenType.EscapedScalar, col = 2, text = "apple", line = 1 },
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 7 },
@@ -221,7 +221,7 @@ end
 
 function M.test_escaped_scalar_with_multi_newline_tokens(testrun)
   local expected = {
-    { text = "", indent = 0, line = 1, type = TokenType.Indent },
+    { text = "", indent = 0, line = 1, type = TokenType.BlockIndent },
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 1 },
     { type = TokenType.EscapedScalar, col = 2, text = "one\ntwo", line = 1 },
     { type = TokenType.DoubleQuote, text = "\"", line = 3, col = 4 },
@@ -234,7 +234,7 @@ end
 
 function M.test_escaped_scalar_with_one_newline_tokens(testrun)
   local expected = {
-    { text = "", indent = 0, line = 1, type = TokenType.Indent },
+    { text = "", indent = 0, line = 1, type = TokenType.BlockIndent },
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 1 },
     { type = TokenType.EscapedScalar, col = 2, text = "one two", line = 1 },
     { type = TokenType.DoubleQuote, text = "\"", line = 2, col = 4 },
@@ -247,7 +247,7 @@ end
 
 function M.test_empty_escaped_scalar_tokens(testrun)
   local expected = {
-    { text = "", indent = 0, line = 1, type = TokenType.Indent },
+    { text = "", indent = 0, line = 1, type = TokenType.BlockIndent },
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 1 },
     { type = TokenType.EscapedScalar, col = 2, text = "", line = 1 },
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 2 },
@@ -260,7 +260,7 @@ end
 
 function M.test_escaped_scalar_with_escaped_newline_tokens(testrun)
   local expected = {
-    { text = "", indent = 0, line = 1, type = TokenType.Indent },
+    { text = "", indent = 0, line = 1, type = TokenType.BlockIndent },
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 1 },
     { type = TokenType.EscapedScalar, col = 2, text = "one\ntwo", line = 1 },
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 10 },
@@ -305,7 +305,7 @@ end
 
 function M.test_anchor_name_tokens(testrun)
   local expected = {
-    { line = 1, indent = 0, text = "", type = TokenType.Indent },
+    { line = 1, indent = 0, text = "", type = TokenType.BlockIndent },
     { line = 1, type = TokenType.Anchor, text = "&", col = 1 },
     { line = 1, type = TokenType.AnchorName, text = "anchor_name_1", col = 2 },
     { type = TokenType.DocumentEnd, text = "" },
@@ -317,7 +317,7 @@ end
 
 function M.test_alias_tokens(testrun)
   local expected = {
-    { line = 1, indent = 0, text = "", type = TokenType.Indent },
+    { line = 1, indent = 0, text = "", type = TokenType.BlockIndent },
     { line = 1, type = TokenType.Alias, text = "*", col = 1 },
     { line = 1, type = TokenType.AnchorName, text = "anchor_name_1", col = 2 },
     { type = TokenType.DocumentEnd, text = "" },
@@ -329,7 +329,7 @@ end
 
 function M.test_bad_anchor_name_tokens(testrun)
   local expected = {
-    { line = 1, indent = 0, text = "", type = TokenType.Indent },
+    { line = 1, indent = 0, text = "", type = TokenType.BlockIndent },
     { line = 1, type = TokenType.Anchor, text = "&", col = 1 },
     { line = 1, type = TokenType.PlainScalar, text = "6anchor", col = 2 },
     { type = TokenType.DocumentEnd, text = "" },
@@ -532,6 +532,46 @@ function M.test_folded_scalar_empty_newline_ending_tokens(testrun)
   local tokens = generate_folded_tokens("  line one\n", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
+end
+
+function M.test_single_plain_scalar_document(testrun)
+  local source = "yaml"
+  local expected = {
+    document_tree = {
+      content = {
+        type = "scalar",
+        content = "yaml",
+      },
+    },
+  }
+
+  return common.dummy_test(testrun)
+end
+
+function M.test_simple_sequence_document(testrun)
+  local source = [[
+- item 1
+- item 2]]
+  local expected = {
+    document_tree = {
+      content = {
+        type = "sequence",
+        indent = 0,
+        content = {
+          {
+            type = "scalar",
+            content = "item 1",
+          },
+          {
+            type = "scalar",
+            content = "item 2",
+          },
+        },
+      },
+    },
+  }
+
+  return common.dummy_test(testrun)
 end
 
 return M

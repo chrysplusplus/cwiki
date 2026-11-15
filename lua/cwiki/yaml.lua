@@ -6,7 +6,6 @@
 
 local M = {}
 
---local stream = require "cwiki.stream" -- too complex ??
 local util = require "cwiki.util"
 local enum = util.enum
 local enum_to_string = util.enum_to_string
@@ -126,7 +125,7 @@ local function trim_trailing(s)
 end
 
 local TokenType = enum{
-  "Indent",
+  "BlockIndent",
   "DocumentEnd",
   "SingleQuote",
   "DoubleQuote",
@@ -171,33 +170,6 @@ local TokeniserState = enum{
   "EmitFoldIndent",
   "EmitFoldDocumentEnd",
 }
-
-if DEBUG then
-  print_tokeniser = function(t)
-    return string.format(
-      "{ source = \"...\", state = %s, index = %d, ... }",
-      enum_to_string(TokeniserState, t.state),
-      t.index)
-  end
-
-  print_token = function(t)
-    if not t then return nil end
-    local keyvals = {}
-    for k, v in pairs(t) do
-      if k == "type" then
-        table.insert(keyvals, string.format("type = %s", enum_to_string(TokenType, v)))
-      elseif type(v) == "string" then
-        table.insert(keyvals, string.format("%s = \"%s\"", k, v))
-      elseif type(v) == "number" then
-        table.insert(keyvals, string.format("%s = %d", k, v))
-      elseif type(v) == "table" then
-        table.insert(keyvals, string.format("%s = { ... }", k))
-      end
-    end
-
-    return string.format("{ %s }", table.concat(keyvals, ", "))
-  end
-end
 
 -- Tokeniser objects represent a generator that emits a sequence of lexical
 -- tokens that represents the received source string
@@ -327,7 +299,7 @@ function Tokeniser:next()
     local indent = new_index - self.index
     self.index = new_index
     self:transition_state(TokeniserState.FindBlockTokenStart)
-    return self:emit_token(TokenType.Indent, self:position_table{ indent = indent })
+    return self:emit_token(TokenType.BlockIndent, self:position_table{ indent = indent })
 
   elseif self.state == TokeniserState.FindBlockTokenStart then
     local ch = peek(self.source, self.index)
@@ -720,11 +692,137 @@ function Tokeniser:next()
   if DEBUG then assert(false, "Unreachable") end
 end
 
+-- Return a readable representation of the tokeniser state
+local function print_tokeniser(t)
+  return string.format(
+    "{ source = \"...\", state = %s, index = %d, ... }",
+    enum_to_string(TokeniserState, t.state),
+    t.index)
+end
+
+-- Return a readable representation of a token
+local function print_token(t)
+  if not t then return nil end
+  local keyvals = {}
+  for k, v in pairs(t) do
+    if k == "type" then
+      table.insert(keyvals, string.format("type = %s", enum_to_string(TokenType, v)))
+    elseif type(v) == "string" then
+      table.insert(keyvals, string.format("%s = \"%s\"", k, v))
+    elseif type(v) == "number" then
+      table.insert(keyvals, string.format("%s = %d", k, v))
+    elseif type(v) == "table" then
+      table.insert(keyvals, string.format("%s = { ... }", k))
+    end
+  end
+
+  return string.format("{ %s }", table.concat(keyvals, ", "))
+end
+
+-- Return a StackStream object wrapping a tokeniser
+local function tokeniser_stream_adaptor(tokeniser)
+  return require "cwiki.stream".StackStream:new{
+    next_fn = function (tknsr, ctrl)
+      return ctrl, tknsr:next()
+    end,
+    invar = tokeniser,
+    ctrl = 0,
+  }
+end
+
+local ParserNodeType = enum {
+}
+
+local ParserContext = enum {
+  "Finished",
+  "AtRoot",
+  "ExpectBlockNode",
+  "ExpectUnescapedScalar",
+  "ExpectEscapedScalar",
+  "InFoldedScalar",
+}
+
+-- Parser objects present a YAML document builder that accepts tokens from a
+-- tokeniser (see Tokeniser) and manages the document context of that tokeniser
+local Parser = {}
+function Parser:new(source)
+  local tokeniser = Tokeniser:new(source)
+  local obj = {
+    tokeniser = tokeniser,
+    token_stream = tokeniser_stream_adaptor(tokeniser),
+    context = ParserContext.AtRoot,
+    document_tree = {},
+  }
+  setmetatable(obj, {__index = self})
+  return obj
+end
+
+function Parser:set_context(context)
+  self.context, _ = assert(context, "Not a member of ParserContext")
+end
+
+-- TODO test TokenType coverage
+-- TODO test ParserContext coverage
+function Parser:parse_token(token)
+  local ttype = assert(token.type)
+  if self.context == ParserContext.Finished then return end
+
+  if self.context == ParserContext.AtRoot then
+    assert(ttype == TokenType.BlockIndent)
+    self.document = {
+      type = ParserNodeType.YAMLDocument,
+      indent = assert(token.indent),
+      contents = {},
+    }
+    return self:set_context(ParserContext.ExpectBlockNode)
+
+  elseif self.context == ParserContext.ExpectBlockNode then
+    assert(ttype ~= TokenType.BlockIndent and ttype ~= TokenType.FoldIndent and ttype ~= TokenType.FoldLine and ttype ~= TokenType.FoldNewline)
+    if ttype == TokenType.DocumentEnd then
+      return self:set_context(ParserContext.Finished)
+
+    elseif ttype == TokenType.SingleQuote then
+      return self:set_context(ParserContext.ExpectUnescapedScalar)
+
+    elseif ttype == TokenType.DoubleQuote then
+     return self:set_context(ParserContext.ExpectEscapedScalar)
+
+    elseif ttype == TokenType.Folded then
+      return self:set_context(ParserContext.InFoldedScalar)
+
+    elseif ttype == TokenType.MapValue then
+      error("Empty keys are disallowed in this subset of YAML")
+
+    elseif ttype == TokenType.SeqEnd then
+    elseif ttype == TokenType.MapBegin then
+    elseif ttype == TokenType.MapEnd then
+    elseif ttype == TokenType.Collect then
+    elseif ttype == TokenType.Anchor then
+    elseif ttype == TokenType.Alias then
+    elseif ttype == TokenType.Seq then
+    elseif ttype == TokenType.PlainScalar then
+    elseif ttype == TokenType.UnescapedScalar then
+    elseif ttype == TokenType.EscapedScalar then
+    elseif ttype == TokenType.AnchorName then
+    end
+  end
+
+  if DEBUG then assert(false, "Unreachable") end
+end
+
+-- Module Exports
 M.Tokeniser = Tokeniser
 M.TokenType = TokenType
+M.Parser    = Parser
+
+M.tokeniser_stream_adaptor = tokeniser_stream_adaptor
 
 if DEBUG then
   M.TokeniserState = TokeniserState
+
+  -- global
+  print_tokeniser = print_tokeniser
+  print_token     = print_token
 end
 
 return M
