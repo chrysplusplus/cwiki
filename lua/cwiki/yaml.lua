@@ -85,15 +85,13 @@ end
 
 -- Advance the index past whitespace; return the new index
 local function consume_whitespace(s, idx)
-  local i
-  i, _ = s:find("[^ \t]", idx)
+  local i, _ = s:find("[^ \t]", idx)
   return i or #s + 1
 end
 
 -- Advance the index past the indentation whitespace; return the new index
 local function consume_indent(s, idx)
-  local i
-  i, _ = s:find("[^ ]", idx)
+  local i, _ = s:find("[^ ]", idx)
   return i or #s + 1
 end
 
@@ -146,6 +144,9 @@ local TokenType = enum{
   "UnescapedScalar",
   "EscapedScalar",
   "AnchorName",
+  "FoldIndent",
+  "FoldLine",
+  "FoldNewline",
 }
 
 local TokeniserState = enum{
@@ -165,6 +166,10 @@ local TokeniserState = enum{
   "FindFlowAnchorName",
   "EmitFlowSingleQuote",
   "EmitFlowDoubleQuote",
+  "FindFoldLineStart",
+  "FindFoldLineEnd",
+  "EmitFoldIndent",
+  "EmitFoldDocumentEnd",
 }
 
 if DEBUG then
@@ -251,6 +256,7 @@ end
 -- Note: the text key of the returned table is defaulted to an empty string if
 -- not provided
 function Tokeniser:emit_token(type_, vars)
+  if SINGLE_TEST and not type_ then print(debug.traceback("", 2)) end
   assert(type_, "Not a member of TokenType")
   local token = vars or {}
   token.type = type_
@@ -289,6 +295,7 @@ end
 
 -- Set the tokeniser state to next_state
 function Tokeniser:transition_state(next_state)
+  if SINGLE_TEST and not next_state then print(debug.traceback("", 2)) end
   assert(next_state, "Not a member of TokeniserState")
   self.state = next_state
 end
@@ -303,6 +310,11 @@ function Tokeniser:use_flow_context()
   self.state = TokeniserState.FindFlowTokenStart
 end
 
+-- Set the tokeniser to a folded context
+function Tokeniser:use_folded_context()
+  self.state = TokeniserState.EmitFoldIndent
+end
+
 -- Advance the tokeniser state machine to emit the next token in the source, or
 -- nil if the tokeniser is finished
 function Tokeniser:next()
@@ -311,12 +323,11 @@ function Tokeniser:next()
 
   elseif self.state == TokeniserState.EmitBlockIndent then
     local ch = peek(self.source, self.index)
-    local line, _ = self:position()
     local new_index = consume_indent(self.source, self.index)
     local indent = new_index - self.index
     self.index = new_index
     self:transition_state(TokeniserState.FindBlockTokenStart)
-    return self:emit_token(TokenType.Indent, { indent = indent, line = line })
+    return self:emit_token(TokenType.Indent, self:position_table{ indent = indent })
 
   elseif self.state == TokeniserState.FindBlockTokenStart then
     local ch = peek(self.source, self.index)
@@ -655,6 +666,55 @@ function Tokeniser:next()
     local token = self:emit_token(TokenType.AnchorName, self:position_table{ text = anchor_name })
     self.index = new_index
     return token
+
+  elseif self.state == TokeniserState.EmitFoldIndent then
+    local new_index = consume_indent(self.source, self.index)
+    local indent = new_index - self.index
+    local token = self:emit_token(TokenType.FoldIndent, self:position_table{ indent = indent })
+    self.index = new_index
+    self:transition_state(TokeniserState.FindFoldLineStart)
+    return token
+
+  elseif self.state == TokeniserState.FindFoldLineStart then
+    local ch = peek(self.source, self.index)
+    if ch == INDICATORS.EOF then
+      self:transition_state(TokeniserState.EmitFoldDocumentEnd)
+      return self:emit_token(TokenType.FoldNewline)
+
+    elseif ch == INDICATORS.EOL then
+      self.index = self.index + 1
+      self:newline()
+      self:transition_state(TokeniserState.EmitFoldIndent)
+      return self:emit_token(TokenType.FoldNewline)
+
+    else
+      self:set_accumulator(ch)
+      self.index = self.index + 1
+      self:transition_state(TokeniserState.FindFoldLineEnd)
+      return self:next()
+    end
+
+  elseif self.state == TokeniserState.EmitFoldDocumentEnd then
+    self:transition_state(TokeniserState.Finished)
+    return self:emit_token(TokenType.DocumentEnd)
+
+  elseif self.state == TokeniserState.FindFoldLineEnd then
+    local ch = peek(self.source, self.index)
+    if ch == INDICATORS.EOF then
+      self:transition_state(TokeniserState.EmitFoldDocumentEnd)
+      return self:emit_token(TokenType.FoldLine, self:use_accumulator())
+
+    elseif ch == INDICATORS.EOL then
+      self.index = self.index + 1
+      self:newline()
+      self:transition_state(TokeniserState.EmitFoldIndent)
+      return self:emit_token(TokenType.FoldLine, self:use_accumulator())
+
+    else
+      self.index = self.index + 1
+      self.acc.text = self.acc.text .. ch
+      return self:next()
+    end
   end
 
   if DEBUG then assert(false, "Unreachable") end
