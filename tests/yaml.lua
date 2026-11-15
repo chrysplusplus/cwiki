@@ -45,16 +45,26 @@ local function test_result(testrun, status, msg)
   end
 end
 
--- Return list of tokens yielded by tokenising the received source, iterating
--- up to a received limit
-local function generate_tokens(source, limit)
+-- Return list of tokens yielded by tokenising the received source in block
+-- context, iterating up to a received limit
+local function generate_block_tokens(source, limit)
   local tokens = {}
-
   local tokeniser = yaml.Tokeniser:new(source)
   for _ = 1, limit do
     table.insert(tokens, tokeniser:next())
   end
+  return tokens
+end
 
+-- Return list of tokens yielded by tokenising the received source in flow
+-- context, iterating up to a received limit
+local function generate_flow_tokens(source, limit)
+  local tokens = {}
+  local tokeniser = yaml.Tokeniser:new(source)
+  tokeniser:use_flow_context()
+  for _ = 1, limit do
+    table.insert(tokens, tokeniser:next())
+  end
   return tokens
 end
 
@@ -63,7 +73,7 @@ function M.test_empty_source_tokens(testrun)
     { text = "", indent = 0, type = TokenType.Indent, line = 1 },
     { type = TokenType.DocumentEnd, text = "" }
   }
-  local tokens = generate_tokens("", 2)
+  local tokens = generate_block_tokens("", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -74,7 +84,7 @@ function M.test_comment_tokens(testrun)
     { text = "", indent = 0, type = TokenType.Indent, line = 1 },
     { type = TokenType.DocumentEnd, text = "" }
   }
-  local tokens = generate_tokens("# comment", 3)
+  local tokens = generate_block_tokens("# comment", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -85,7 +95,7 @@ function M.test_plain_scalar(testrun)
     { line = 1, text = "test", type = TokenType.PlainScalar, col = 1 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens("test", 3)
+  local tokens = generate_block_tokens("test", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -97,7 +107,7 @@ function M.test_seq_single_entry_tokens(testrun)
     { line = 1, text = "entry", type = TokenType.PlainScalar, col = 3 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens("- entry", 4)
+  local tokens = generate_block_tokens("- entry", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -107,12 +117,12 @@ function M.test_seq_multi_entry_tokens(testrun)
     { text = "", indent = 0, line = 1, type = TokenType.Indent },
     { type = TokenType.Seq, text = "-", line = 1, col = 1 },
     { type = TokenType.PlainScalar, col = 3, text = "one", line = 1 },
-    { text = "", indent = 0, line = 1, type = TokenType.Indent },
-    { type = TokenType.Seq, text = "-", line = 1, col = 7 },
-    { type = TokenType.PlainScalar, col = 9, text = "two", line = 1 },
+    { text = "", indent = 0, line = 2, type = TokenType.Indent },
+    { type = TokenType.Seq, text = "-", line = 2, col = 1 },
+    { type = TokenType.PlainScalar, col = 3, text = "two", line = 2 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens("- one\n- two", 7)
+  local tokens = generate_block_tokens("- one\n- two", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -125,7 +135,7 @@ function M.test_unescaped_scalar_tokens(testrun)
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 7 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens("'apple'", 5)
+  local tokens = generate_block_tokens("'apple'", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -138,7 +148,7 @@ function M.test_empty_unescaped_scalar_tokens(testrun)
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 2 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens("''", 5)
+  local tokens = generate_block_tokens("''", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -151,7 +161,7 @@ function M.test_unescaped_scalar_with_quote_tokens(testrun)
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 13 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens("'tom''s ball'", 5)
+  local tokens = generate_block_tokens("'tom''s ball'", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -164,7 +174,7 @@ function M.test_unescaped_scalar_with_one_newline_tokens(testrun)
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 9 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens("'one\ntwo'", 5)
+  local tokens = generate_block_tokens("'one\ntwo'", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -177,7 +187,7 @@ function M.test_unescaped_scalar_with_multi_newline_tokens(testrun)
     { type = TokenType.SingleQuote, text = "'", line = 1, col = 10 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens("'one\n\ntwo'", 5)
+  local tokens = generate_block_tokens("'one\n\ntwo'", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -190,7 +200,7 @@ function M.test_escaped_scalar_tokens(testrun)
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 7 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens('"apple"', 5)
+  local tokens = generate_block_tokens('"apple"', #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -203,7 +213,7 @@ function M.test_escaped_scalar_with_multi_newline_tokens(testrun)
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 10 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens('"one\n\ntwo"', 5)
+  local tokens = generate_block_tokens('"one\n\ntwo"', #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -216,7 +226,7 @@ function M.test_escaped_scalar_with_one_newline_tokens(testrun)
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 9 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens('"one\ntwo"', 5)
+  local tokens = generate_block_tokens('"one\ntwo"', #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -229,7 +239,7 @@ function M.test_empty_escaped_scalar_tokens(testrun)
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 2 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens('""', 5)
+  local tokens = generate_block_tokens('""', #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -242,7 +252,7 @@ function M.test_escaped_scalar_with_escaped_newline_tokens(testrun)
     { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 10 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens('"one\\ntwo"', 5)
+  local tokens = generate_block_tokens('"one\\ntwo"', #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -286,7 +296,7 @@ function M.test_anchor_name_tokens(testrun)
     { line = 1, type = TokenType.AnchorName, text = "anchor_name_1", col = 2 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens("&anchor_name_1", 4)
+  local tokens = generate_block_tokens("&anchor_name_1", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -298,7 +308,7 @@ function M.test_alias_tokens(testrun)
     { line = 1, type = TokenType.AnchorName, text = "anchor_name_1", col = 2 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens("*anchor_name_1", 4)
+  local tokens = generate_block_tokens("*anchor_name_1", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -310,7 +320,7 @@ function M.test_bad_anchor_name_tokens(testrun)
     { line = 1, type = TokenType.PlainScalar, text = "6anchor", col = 2 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_tokens("&6anchor", 4)
+  local tokens = generate_block_tokens("&6anchor", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -328,28 +338,143 @@ function M.test_debug_tokeniser_state_coverage(testrun)
   return report_pass(testrun)
 end
 
-function M.test_tokeniser_state_find_flow_token_start(testrun)
-  return common.dummy_test(testrun)
+function M.test_flow_empty_tokens(testrun)
+  local expected = {
+    { type = DocumentEnd, text = "" }
+  }
+  local tokens = generate_flow_tokens("", #expected)
+  local status, msg = check_tokens(expected, tokens)
+  return test_result(testrun, status, msg)
 end
 
-function M.test_tokeniser_state_find_flow_plain_scalar_end(testrun)
-  return common.dummy_test(testrun)
+function M.test_flow_whitespace_tokens(testrun)
+  local expected = {
+    { type = TokenType.PlainScalar, text = "one", line = 1, col = 1 },
+    { type = TokenType.PlainScalar, text = "two", line = 1, col = 7 },
+    { type = TokenType.PlainScalar, text = "three", line = 1, col = 11 },
+    { type = TokenType.DocumentEnd, text = "" },
+  }
+  local tokens = generate_flow_tokens("one\n\t\ntwo\nthree", #expected)
+  local status, msg = check_tokens(expected, tokens)
+  return test_result(testrun, status, msg)
 end
 
-function M.test_tokeniser_state_find_flow_unescaped_scalar_end(testrun)
-  return common.dummy_test(testrun)
+function M.test_flow_comment_tokens(testrun)
+  local expected = {
+    { type = TokenType.PlainScalar, text = "one", line = 1, col = 1 },
+    { type = TokenType.PlainScalar, text = "two", line = 1, col = 15 },
+    { type = TokenType.DocumentEnd, text = "" },
+  }
+  local tokens = generate_flow_tokens("one # comment\ntwo", #expected)
+  local status, msg = check_tokens(expected, tokens)
+  return test_result(testrun, status, msg)
 end
 
-function M.test_tokeniser_state_emit_flow_single_quote(testrun)
-  return common.dummy_test(testrun)
+function M.test_flow_special_characters_tokens(testrun)
+  local expected = {
+    { type = TokenType.Folded, text = ">", line = 1, col = 1 },
+    { type = TokenType.Seq, text = "-", line = 1, col = 2 },
+    { type = TokenType.MapValue, text = ":", line = 1, col = 3 },
+    { type = TokenType.SeqBegin, text = "[", line = 1, col = 4 },
+    { type = TokenType.SeqEnd, text = "]", line = 1, col = 5 },
+    { type = TokenType.MapBegin, text = "{", line = 1, col = 6 },
+    { type = TokenType.MapEnd, text = "}", line = 1, col = 7 },
+    { type = TokenType.Collect, text = ",", line = 1, col = 8 },
+    { type = TokenType.DocumentEnd, text = "" },
+  }
+  local tokens = generate_flow_tokens(">-:[]{},", #expected)
+  local status, msg = check_tokens(expected, tokens)
+  return test_result(testrun, status, msg)
+end
+
+function M.test_flow_plain_scalar_tokens(testrun)
+  local expected = {
+    { type = TokenType.PlainScalar, text = "one", line = 1, col = 1 },
+    { type = TokenType.Alias, text = "*", line = 1, col = 4 },
+    { type = TokenType.PlainScalar, text = "two", line = 1, col = 6 },
+    { type = TokenType.Anchor, text = "&", line = 1, col = 9 },
+    { type = TokenType.PlainScalar, text = "three", line = 1, col = 11 },
+    { type = TokenType.Collect, text = ",", line = 1, col = 16 },
+    { type = TokenType.PlainScalar, text = "four", line = 1, col = 18 },
+    { type = TokenType.MapEnd, text = "}", line = 1, col = 22 },
+    { type = TokenType.PlainScalar, text = "five", line = 1, col = 24 },
+    { type = TokenType.MapBegin, text = "{", line = 1, col = 28 },
+    { type = TokenType.PlainScalar, text = "six", line = 1, col = 30 },
+    { type = TokenType.SeqEnd, text = "]", line = 1, col = 33 },
+    { type = TokenType.PlainScalar, text = "seven", line = 1, col = 35 },
+    { type = TokenType.SeqBegin, text = "[", line = 1, col = 40 },
+    { type = TokenType.PlainScalar, text = "eight", line = 1, col = 42 },
+    { type = TokenType.MapValue, text = ":", line = 1, col = 47 },
+    { type = TokenType.PlainScalar, text = "nine", line = 1, col = 49 },
+    { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 53 },
+    { type = TokenType.EscapedScalar, text = "", line = 1, col = 54 },
+    { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 54 },
+    { type = TokenType.PlainScalar, text = "ten", line = 1, col = 56 },
+    { type = TokenType.PlainScalar, text = "eleven", line = 1, col = 69 },
+    { type = TokenType.PlainScalar, text = "twelve'", line = 1, col = 76 },
+    { type = TokenType.PlainScalar, text = "thirteen", line = 1, col = 84 },
+    { type = TokenType.DocumentEnd, text = "" },
+  }
+  local tokens = generate_flow_tokens("one* two& three, four} five{ six] seven[ eight: nine\"\" ten# comment\neleven\ntwelve'\nthirteen", #expected)
+  local status, msg = check_tokens(expected, tokens)
+  return test_result(testrun, status, msg)
+end
+
+function M.test_flow_unescaped_scalar_tokens(testrun)
+  local expected = {
+    { type = TokenType.SingleQuote, text = "'", line = 1, col = 1 },
+    { type = TokenType.UnescapedScalar, text = "one", line = 1, col = 2 },
+    { type = TokenType.SingleQuote, text = "'", line = 1, col = 5 },
+    { type = TokenType.SingleQuote, text = "'", line = 1, col = 7 },
+    { type = TokenType.UnescapedScalar, text = "two'", line = 1, col = 8 },
+    { type = TokenType.SingleQuote, text = "'", line = 1, col = 13 },
+    { type = TokenType.SingleQuote, text = "'", line = 1, col = 15 },
+    { type = TokenType.UnescapedScalar, text = "three next word", line = 1, col = 16 },
+    { type = TokenType.SingleQuote, text = "'", line = 1, col = 31 },
+    { type = TokenType.SingleQuote, text = "'", line = 1, col = 33 },
+    { type = TokenType.UnescapedScalar, text = "four\nnext line", line = 1, col = 34 },
+    { type = TokenType.SingleQuote, text = "'", line = 1, col = 49 },
+    { type = TokenType.SingleQuote, text = "'", line = 1, col = 51 },
+    { type = TokenType.UnescapedScalar, text = "five", line = 1, col = 52 },
+    { type = TokenType.DocumentEnd, text = "" },
+  }
+  local tokens = generate_flow_tokens("'one' 'two''' 'three\nnext word' 'four\n\nnext line' 'five", #expected)
+  local status, msg = check_tokens(expected, tokens)
+  return test_result(testrun, status, msg)
 end
 
 function M.test_tokeniser_state_find_flow_escaped_scalar_end(testrun)
-  return common.dummy_test(testrun)
+  local expected = {
+    { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 1 },
+    { type = TokenType.EscapedScalar, text = "one", line = 1, col = 2 },
+    { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 5 },
+    { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 7 },
+    { type = TokenType.EscapedScalar, text = "two next word", line = 1, col = 8 },
+    { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 21 },
+    { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 23 },
+    { type = TokenType.EscapedScalar, text = "three\nnext line", line = 1, col = 24 },
+    { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 40 },
+    { type = TokenType.DoubleQuote, text = "\"", line = 1, col = 42 },
+    { type = TokenType.EscapedScalar, text = "four", line = 1, col = 43 },
+    { type = TokenType.DocumentEnd, text = "" },
+  }
+  local tokens = generate_flow_tokens('"one" "two\nnext word" "three\n\nnext line" "four', #expected)
+  local status, msg = check_tokens(expected, tokens)
+  return test_result(testrun, status, msg)
 end
 
-function M.test_tokeniser_state_find_flow_anchor_name(testrun)
-  return common.dummy_test(testrun)
+function M.test_flow_anchor_name_tokens(testrun)
+  local expected = {
+    { type = TokenType.Anchor, text = "&", line = 1, col = 1 },
+    { type = TokenType.AnchorName, text = "anchor", line = 1, col = 2 },
+    { type = TokenType.Alias, text = "*", line = 1, col = 9 },
+    { type = TokenType.AnchorName, text = "anchor", line = 1, col = 10 },
+    { type = TokenType.PlainScalar, text = "two", line = 1, col = 17 },
+    { type = TokenType.DocumentEnd, text = "" },
+  }
+  local tokens = generate_flow_tokens("&anchor *anchor two", #expected)
+  local status, msg = check_tokens(expected, tokens)
+  return test_result(testrun, status, msg)
 end
 
 return M

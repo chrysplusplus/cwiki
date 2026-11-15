@@ -169,15 +169,14 @@ local TokeniserState = enum{
 
 if DEBUG then
   print_tokeniser = function(t)
-    print(string.format(
+    return string.format(
       "{ source = \"...\", state = %s, index = %d, ... }",
       enum_to_string(TokeniserState, t.state),
-      t.index
-    ))
+      t.index)
   end
 
   print_token = function(t)
-    if not t then print(nil); return end
+    if not t then return nil end
     local keyvals = {}
     for k, v in pairs(t) do
       if k == "type" then
@@ -191,7 +190,7 @@ if DEBUG then
       end
     end
 
-    print(string.format("{ %s }", table.concat(keyvals, ", ")))
+    return string.format("{ %s }", table.concat(keyvals, ", "))
   end
 
   M.TokeniserState = TokeniserState
