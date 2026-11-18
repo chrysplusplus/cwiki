@@ -721,16 +721,22 @@ end
 
 -- Return a StackStream object wrapping a tokeniser
 local function tokeniser_stream_adaptor(tokeniser)
-  return require "cwiki.stream".StackStream:new{
+  -- couldn't the tokeniser just be the upstream, since it has a :next method?
+  local stream = require "cwiki.stream"
+  local upstream = stream.Stream:new {
     next_fn = function (tknsr, ctrl)
       return ctrl, tknsr:next()
     end,
     invar = tokeniser,
     ctrl = 0,
   }
+  return stream.StackStream:new(upstream)
 end
 
 local ParserNodeType = enum {
+  "Root",
+  "Scalar",
+  "Sequence",
 }
 
 local ParserContext = enum {
@@ -740,7 +746,25 @@ local ParserContext = enum {
   "ExpectUnescapedScalar",
   "ExpectEscapedScalar",
   "InFoldedScalar",
+  "ExpectIndentOrMappingInBlock",
+  "InBlockSequence",
+  "ExpectIndentOrMappingInSequence",
+  "ExpectingSequence",
 }
+
+if DEBUG then
+  local _debug_restrict_accessor_tbl = {
+    __index = function (t, k)
+      assert(type(t) == "table")
+      return assert(rawget(t, k))
+    end,
+    __newindex = function (...) error("Operation not permitted") end
+  }
+
+  -- debug accessor for enums
+  setmetatable(ParserNodeType, _debug_restrict_accessor_tbl)
+  setmetatable(ParserContext, _debug_restrict_accessor_tbl)
+end
 
 -- Parser objects present a YAML document builder that accepts tokens from a
 -- tokeniser (see Tokeniser) and manages the document context of that tokeniser
@@ -752,6 +776,8 @@ function Parser:new(source)
     token_stream = tokeniser_stream_adaptor(tokeniser),
     context = ParserContext.AtRoot,
     document_tree = {},
+    node_stack = {},
+    current_indent = 0,
   }
   setmetatable(obj, {__index = self})
   return obj
@@ -761,25 +787,39 @@ function Parser:set_context(context)
   self.context, _ = assert(context, "Not a member of ParserContext")
 end
 
+function Parser:combine_nodes_on_stack()
+  if DEBUG then assert(#self.node_stack >= 2) end
+  local child_node = table.remove(self.node_stack)
+  local parent_node = self.node_stack[#self.node_stack]
+  if parent_node.type == ParserNodeType.Sequence then
+    table.insert(parent_node.content, child_node)
+  else
+    parent_node.content = child_node
+  end
+end
+
 -- TODO test TokenType coverage
 -- TODO test ParserContext coverage
+-- TODO better error handling
 function Parser:parse_token(token)
   local ttype = assert(token.type)
   if self.context == ParserContext.Finished then return end
 
   if self.context == ParserContext.AtRoot then
     assert(ttype == TokenType.BlockIndent)
-    self.document = {
-      type = ParserNodeType.YAMLDocument,
-      indent = assert(token.indent),
-      contents = {},
-    }
+    self.current_indent = assert(token.indent)
+    table.insert(self.node_stack, {
+      type = ParserNodeType.Root,
+      content = {},
+    })
     return self:set_context(ParserContext.ExpectBlockNode)
 
   elseif self.context == ParserContext.ExpectBlockNode then
-    assert(ttype ~= TokenType.BlockIndent and ttype ~= TokenType.FoldIndent and ttype ~= TokenType.FoldLine and ttype ~= TokenType.FoldNewline)
-    if ttype == TokenType.DocumentEnd then
-      return self:set_context(ParserContext.Finished)
+    if ttype == TokenType.BlockIndent then
+      error("Not implemented")
+
+    elseif ttype == TokenType.DocumentEnd then
+      error("Not implemented")
 
     elseif ttype == TokenType.SingleQuote then
       return self:set_context(ParserContext.ExpectUnescapedScalar)
@@ -793,20 +833,132 @@ function Parser:parse_token(token)
     elseif ttype == TokenType.MapValue then
       error("Empty keys are disallowed in this subset of YAML")
 
-    elseif ttype == TokenType.SeqEnd then
+    elseif ttype == TokenType.SeqBegin then
+      table.insert(self.node_stack, {
+        type = ParserNodeType.Sequence,
+        content = {},
+      })
+      return self:set_context(ParserContext.InFlowSequence)
+
     elseif ttype == TokenType.MapBegin then
-    elseif ttype == TokenType.MapEnd then
-    elseif ttype == TokenType.Collect then
+      table.insert(self.node_stack, {
+        type = ParserNodeType.Mapping,
+        content = {},
+      })
+      return self:set_context(ParserContext.ExpectFlowMapKey)
+
     elseif ttype == TokenType.Anchor then
+      return self:set_context(ParserContext.ExpectAnchorName)
+
     elseif ttype == TokenType.Alias then
+      return self:set_context(ParserContext.ExpectAliasName)
+
     elseif ttype == TokenType.Seq then
+      table.insert(self.node_stack, {
+        type = ParserNodeType.Sequence,
+        content = {},
+      })
+      return self:set_context(ParserContext.InBlockSequence)
+
     elseif ttype == TokenType.PlainScalar then
-    elseif ttype == TokenType.UnescapedScalar then
-    elseif ttype == TokenType.EscapedScalar then
-    elseif ttype == TokenType.AnchorName then
+      table.insert(self.node_stack, {
+        type = ParserNodeType.Scalar,
+        content = token.text,
+        token = token,
+        indent = self.current_indent,
+      })
+      return self:set_context(ParserContext.ExpectIndentOrMappingInBlock)
+
+    else
+      error(string.format("Unexpected token of type TokenType.%s", enum_to_string(TokenType, ttype)))
+    end
+
+  elseif self.context == ParserContext.ExpectIndentOrMappingInBlock then
+    if ttype == TokenType.BlockIndent then
+      error("Not implemented")
+
+    elseif ttype == TokenType.DocumentEnd then
+      self:combine_nodes_on_stack()
+      if DEBUG then assert(#self.node_stack == 1) end
+      self.document_tree = table.remove(self.node_stack)
+      return self:set_context(ParserContext.Finished)
+
+    elseif ttype == TokenType.MapValue then
+      error("Not implemented")
+    else
+      error("Not implemented")
+    end
+
+  elseif self.context == ParserContext.InBlockSequence then
+    if ttype == TokenType.BlockIndent then
+      error("Not implemented")
+    elseif ttype == TokenType.SingleQuote then
+      error("Not implemented")
+    elseif ttype == TokenType.DoubleQuote then
+      error("Not implemented")
+    elseif ttype == TokenType.Folded then
+      error("Not implemented")
+    elseif ttype == TokenType.SeqBegin then
+      error("Not implemented")
+    elseif ttype == TokenType.MapBegin then
+      error("Not implemented")
+    elseif ttype == TokenType.Anchor then
+      error("Not implemented")
+    elseif ttype == TokenType.Alias then
+      error("Not implemented")
+
+    elseif ttype == TokenType.PlainScalar then
+      table.insert(self.node_stack, {
+        type = ParserNodeType.Scalar,
+        content = token.text,
+        token = token,
+        indent = self.current_indent,
+      })
+      return self:set_context(ParserContext.ExpectIndentOrMappingInSequence)
+
+    else
+      error("Not implemented")
+    end
+
+  elseif self.context == ParserContext.ExpectIndentOrMappingInSequence then
+    if ttype == TokenType.BlockIndent then
+      self:combine_nodes_on_stack()
+      local next_indent = assert(token.indent)
+      if next_indent < self.current_indent then error "Not implemented" end
+      self.current_indent = next_indent
+      return self:set_context(ParserContext.ExpectingSequence)
+
+    elseif ttype == TokenType.DocumentEnd then
+      self:combine_nodes_on_stack()
+      if DEBUG then assert(#self.node_stack == 1) end
+      self.document_tree = table.remove(self.node_stack)
+      return self:set_context(ParserContext.Finished)
+
+    elseif ttype == TokenType.MapValue then
+      error "Not implemented"
+    else
+      error "Not implemented"
+    end
+
+  elseif self.context == ParserContext.ExpectingSequence then
+    if ttype == TokenType.BlockIndent then
+      error "Not implemented"
+
+    elseif ttype == TokenType.DocumentEnd then
+      self:combine_nodes_on_stack()
+      if DEBUG then assert(#self.node_stack == 1) end
+      self.document_tree = table.remove(self.node_stack)
+      return self:set_context(ParserContext.Finished)
+
+    elseif ttype == TokenType.Seq then
+      return self:set_context(ParserContext.InBlockSequence)
+
+    else
+      error "Not implemented"
     end
   end
 
+  if TRACE then print(util.enum_to_string(ParserContext, self.context)) end
   if DEBUG then assert(false, "Unreachable") end
 end
 
@@ -820,9 +972,11 @@ M.tokeniser_stream_adaptor = tokeniser_stream_adaptor
 if DEBUG then
   M.TokeniserState = TokeniserState
 
-  -- global
-  print_tokeniser = print_tokeniser
-  print_token     = print_token
+  M.ParserContext  = ParserContext
+  M.ParserNodeType = ParserNodeType
+
+  M.print_tokeniser = print_tokeniser
+  M.print_token     = print_token
 end
 
 return M

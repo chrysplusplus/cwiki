@@ -80,6 +80,40 @@ local function generate_folded_tokens(source, limit)
   return tokens
 end
 
+-- Return the document tree at the end of parsing the received source
+local function generate_document(source)
+  local parser = yaml.Parser:new(source)
+  for t in parser.token_stream:iter() do
+    parser:parse_token(t)
+  end
+  return parser.document_tree
+end
+
+-- Check the structure of the received document matches that of the expected
+-- table; return "pass" or "fail" and a message
+local function check_document(expected, received)
+  local nodes_to_check = { { "root", expected, received } }
+  while #nodes_to_check > 0 do
+    local _next = table.remove(nodes_to_check, 1)
+    local loc, expect_node, rec_node = _next[1], _next[2], _next[3]
+    if rec_node == nil then
+      return "fail", string.format("Node at %s is nil", loc)
+    end
+
+    for k, v in pairs(expect_node) do
+      local node_loc = loc .. "." .. k
+      local rec_v = rec_node[k]
+      if type(v) == "table" then
+        table.insert(nodes_to_check, { node_loc, v, rec_v })
+      elseif rec_v ~= v then
+        return "fail", string.format("Wrong value at %s: expected %s, got %s", node_loc, tostring(v), tostring(rec_v))
+      end
+    end
+  end
+
+  return "pass", ""
+end
+
 function M.test_empty_source_tokens(testrun)
   local expected = {
     { text = "", indent = 0, type = TokenType.BlockIndent, line = 1 },
@@ -537,15 +571,17 @@ end
 function M.test_single_plain_scalar_document(testrun)
   local source = "yaml"
   local expected = {
-    document_tree = {
-      content = {
-        type = "scalar",
-        content = "yaml",
-      },
+    type = yaml.ParserNodeType.Root,
+    content = {
+      type = yaml.ParserNodeType.Scalar,
+      content = "yaml",
+      indent = 0,
     },
   }
 
-  return common.dummy_test(testrun)
+  local document = generate_document(source)
+  local status, msg = check_document(expected, document)
+  return test_result(testrun, status, msg)
 end
 
 function M.test_simple_sequence_document(testrun)
@@ -554,24 +590,29 @@ function M.test_simple_sequence_document(testrun)
 - item 2]]
   local expected = {
     document_tree = {
+      type = yaml.ParserNodeType.Root,
       content = {
-        type = "sequence",
+        type = yaml.ParserNodeType.Sequence,
         indent = 0,
         content = {
           {
-            type = "scalar",
+            type = yaml.ParserNodeType.Scalar,
             content = "item 1",
+            indent = 2,
           },
           {
-            type = "scalar",
+            type = yaml.ParserNodeType.Scalar,
             content = "item 2",
+            indent = 2,
           },
         },
       },
     },
   }
 
-  return common.dummy_test(testrun)
+  local document = generate_document(source)
+  local status, msg = check_document(expected, document)
+  return test_result(testrun, status, msg)
 end
 
 return M
