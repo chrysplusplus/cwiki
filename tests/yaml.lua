@@ -589,22 +589,20 @@ function M.test_simple_sequence_document(testrun)
 - item 1
 - item 2]]
   local expected = {
-    document_tree = {
-      type = yaml.ParserNodeType.Root,
+    type = yaml.ParserNodeType.Root,
+    content = {
+      type = yaml.ParserNodeType.Sequence,
+      indent = 0,
       content = {
-        type = yaml.ParserNodeType.Sequence,
-        indent = 0,
-        content = {
-          {
-            type = yaml.ParserNodeType.Scalar,
-            content = "item 1",
-            indent = 2,
-          },
-          {
-            type = yaml.ParserNodeType.Scalar,
-            content = "item 2",
-            indent = 2,
-          },
+        {
+          type = yaml.ParserNodeType.Scalar,
+          content = "item 1",
+          indent = 2,
+        },
+        {
+          type = yaml.ParserNodeType.Scalar,
+          content = "item 2",
+          indent = 2,
         },
       },
     },

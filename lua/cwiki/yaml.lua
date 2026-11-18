@@ -737,6 +737,7 @@ local ParserNodeType = enum {
   "Root",
   "Scalar",
   "Sequence",
+  "Mapping",
 }
 
 local ParserContext = enum {
@@ -750,6 +751,7 @@ local ParserContext = enum {
   "InBlockSequence",
   "ExpectIndentOrMappingInSequence",
   "ExpectingSequence",
+  "ExpectDocumentEnd",
 }
 
 if DEBUG then
@@ -787,15 +789,28 @@ function Parser:set_context(context)
   self.context, _ = assert(context, "Not a member of ParserContext")
 end
 
+-- Take the last two nodes on the stack and take the last of these as a child
+-- node of the first
 function Parser:combine_nodes_on_stack()
   if DEBUG then assert(#self.node_stack >= 2) end
   local child_node = table.remove(self.node_stack)
   local parent_node = self.node_stack[#self.node_stack]
   if parent_node.type == ParserNodeType.Sequence then
     table.insert(parent_node.content, child_node)
+  elseif parent_node.type == ParserNodeType.Mapping then
+    error "Not implemented"
   else
     parent_node.content = child_node
   end
+end
+
+-- Repeatedly combine the stack until onyl one node is left, then assign the
+-- result to the parser document tree
+function Parser:finalise_document()
+  while #self.node_stack >= 2 do
+    self:combine_nodes_on_stack()
+  end
+  self.document_tree = table.remove(self.node_stack)
 end
 
 -- TODO test TokenType coverage
@@ -831,7 +846,7 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.InFoldedScalar)
 
     elseif ttype == TokenType.MapValue then
-      error("Empty keys are disallowed in this subset of YAML")
+      error "Empty keys are disallowed in this subset of YAML"
 
     elseif ttype == TokenType.SeqBegin then
       table.insert(self.node_stack, {
@@ -856,8 +871,10 @@ function Parser:parse_token(token)
     elseif ttype == TokenType.Seq then
       table.insert(self.node_stack, {
         type = ParserNodeType.Sequence,
+        indent = self.current_indent,
         content = {},
       })
+      self.current_indent = self.current_indent + 2
       return self:set_context(ParserContext.InBlockSequence)
 
     elseif ttype == TokenType.PlainScalar then
@@ -878,9 +895,7 @@ function Parser:parse_token(token)
       error("Not implemented")
 
     elseif ttype == TokenType.DocumentEnd then
-      self:combine_nodes_on_stack()
-      if DEBUG then assert(#self.node_stack == 1) end
-      self.document_tree = table.remove(self.node_stack)
+      self:finalise_document()
       return self:set_context(ParserContext.Finished)
 
     elseif ttype == TokenType.MapValue then
@@ -929,10 +944,9 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.ExpectingSequence)
 
     elseif ttype == TokenType.DocumentEnd then
-      self:combine_nodes_on_stack()
-      if DEBUG then assert(#self.node_stack == 1) end
-      self.document_tree = table.remove(self.node_stack)
-      return self:set_context(ParserContext.Finished)
+      self.token_stream.push(token)
+      self.token_stream.push({ type = TokenType.BlockIndent, indent = 0 })
+      return self:set_context(ParserContext.ExpectDocumentEnd)
 
     elseif ttype == TokenType.MapValue then
       error "Not implemented"
@@ -945,10 +959,9 @@ function Parser:parse_token(token)
       error "Not implemented"
 
     elseif ttype == TokenType.DocumentEnd then
-      self:combine_nodes_on_stack()
-      if DEBUG then assert(#self.node_stack == 1) end
-      self.document_tree = table.remove(self.node_stack)
-      return self:set_context(ParserContext.Finished)
+      self.token_stream:push(token)
+      self.token_stream:push{ type = TokenType.BlockIndent, indent = 0 }
+      return self:set_context(ParserContext.ExpectDocumentEnd)
 
     elseif ttype == TokenType.Seq then
       return self:set_context(ParserContext.InBlockSequence)
