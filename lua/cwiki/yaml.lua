@@ -789,26 +789,43 @@ function Parser:set_context(context)
   self.context, _ = assert(context, "Not a member of ParserContext")
 end
 
--- Take the last two nodes on the stack and take the last of these as a child
--- node of the first
-function Parser:combine_nodes_on_stack()
-  if DEBUG then assert(#self.node_stack >= 2) end
-  local child_node = table.remove(self.node_stack)
-  local parent_node = self.node_stack[#self.node_stack]
-  if parent_node.type == ParserNodeType.Sequence then
-    table.insert(parent_node.content, child_node)
-  elseif parent_node.type == ParserNodeType.Mapping then
+-- Nest a child node within a parent and return the result
+local function adopt_node(parent, child)
+  if parent.type == ParserNodeType.Sequence then
+    table.insert(parent.content, child)
+  elseif parent.type == ParserNodeType.Mapping then
     error "Not implemented"
   else
-    parent_node.content = child_node
+    parent.content = child
   end
+  return parent
 end
 
--- Repeatedly combine the stack until onyl one node is left, then assign the
+-- Return the indent of the node at the top of the node stack
+function Parser:get_last_node()
+  return assert(self.node_stack[#self.node_stack])
+end
+
+-- Push a node onto the parser stack, combining the stack if the indent of the
+-- received node is less than that at the top of the stack
+function Parser:push_node_to_stack(node)
+  if #self.node_stack == 0 then self.node_stack[1] = node; return end
+  local next_indent = assert(node.indent)
+  local prev_indent = assert(self:get_last_node().indent)
+  while next_indent < prev_indent do
+    local child = table.remove(self.node_stack)
+    adopt_node(self:get_last_node(), child)
+    prev_indent = assert(self:get_last_node().indent)
+  end
+  table.insert(self.node_stack, node)
+end
+
+-- Repeatedly combine the stack until only one node is left, then assign the
 -- result to the parser document tree
 function Parser:finalise_document()
   while #self.node_stack >= 2 do
-    self:combine_nodes_on_stack()
+    local child = table.remove(self.node_stack)
+    adopt_node(self:get_last_node(), child)
   end
   self.document_tree = table.remove(self.node_stack)
 end
@@ -823,10 +840,11 @@ function Parser:parse_token(token)
   if self.context == ParserContext.AtRoot then
     assert(ttype == TokenType.BlockIndent)
     self.current_indent = assert(token.indent)
-    table.insert(self.node_stack, {
+    self:push_node_to_stack{
       type = ParserNodeType.Root,
       content = {},
-    })
+      indent = self.current_indent,
+    }
     return self:set_context(ParserContext.ExpectBlockNode)
 
   elseif self.context == ParserContext.ExpectBlockNode then
@@ -834,7 +852,9 @@ function Parser:parse_token(token)
       error("Not implemented")
 
     elseif ttype == TokenType.DocumentEnd then
-      error("Not implemented")
+      self.token_stream.push(token)
+      self.token_stream.push{ type = TokenType.BlockIndent, indent = 0 }
+      return self:set_context(ParserContext.ExpectDocumentEnd)
 
     elseif ttype == TokenType.SingleQuote then
       return self:set_context(ParserContext.ExpectUnescapedScalar)
@@ -849,17 +869,19 @@ function Parser:parse_token(token)
       error "Empty keys are disallowed in this subset of YAML"
 
     elseif ttype == TokenType.SeqBegin then
-      table.insert(self.node_stack, {
+      self:push_node_to_stack{
         type = ParserNodeType.Sequence,
         content = {},
-      })
+        indent = self.current_indent,
+      }
       return self:set_context(ParserContext.InFlowSequence)
 
     elseif ttype == TokenType.MapBegin then
-      table.insert(self.node_stack, {
+      self:push_node_to_stack{
         type = ParserNodeType.Mapping,
         content = {},
-      })
+        indent = self.current_indent,
+      }
       return self:set_context(ParserContext.ExpectFlowMapKey)
 
     elseif ttype == TokenType.Anchor then
@@ -869,21 +891,21 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.ExpectAliasName)
 
     elseif ttype == TokenType.Seq then
-      table.insert(self.node_stack, {
+      self:push_node_to_stack{
         type = ParserNodeType.Sequence,
         indent = self.current_indent,
         content = {},
-      })
+      }
       self.current_indent = self.current_indent + 2
       return self:set_context(ParserContext.InBlockSequence)
 
     elseif ttype == TokenType.PlainScalar then
-      table.insert(self.node_stack, {
+      self:push_node_to_stack{
         type = ParserNodeType.Scalar,
         content = token.text,
         token = token,
         indent = self.current_indent,
-      })
+      }
       return self:set_context(ParserContext.ExpectIndentOrMappingInBlock)
 
     else
@@ -923,12 +945,12 @@ function Parser:parse_token(token)
       error("Not implemented")
 
     elseif ttype == TokenType.PlainScalar then
-      table.insert(self.node_stack, {
+      self:push_node_to_stack{
         type = ParserNodeType.Scalar,
         content = token.text,
         token = token,
         indent = self.current_indent,
-      })
+      }
       return self:set_context(ParserContext.ExpectIndentOrMappingInSequence)
 
     else
@@ -937,15 +959,13 @@ function Parser:parse_token(token)
 
   elseif self.context == ParserContext.ExpectIndentOrMappingInSequence then
     if ttype == TokenType.BlockIndent then
-      self:combine_nodes_on_stack()
       local next_indent = assert(token.indent)
-      if next_indent < self.current_indent then error "Not implemented" end
       self.current_indent = next_indent
       return self:set_context(ParserContext.ExpectingSequence)
 
     elseif ttype == TokenType.DocumentEnd then
       self.token_stream.push(token)
-      self.token_stream.push({ type = TokenType.BlockIndent, indent = 0 })
+      self.token_stream.push{ type = TokenType.BlockIndent, indent = 0 }
       return self:set_context(ParserContext.ExpectDocumentEnd)
 
     elseif ttype == TokenType.MapValue then
@@ -971,7 +991,7 @@ function Parser:parse_token(token)
     end
   end
 
-  if TRACE then print(util.enum_to_string(ParserContext, self.context)) end
+  if TRACE then print("ParserContxt." .. util.enum_to_string(ParserContext, self.context)) end
   if DEBUG then assert(false, "Unreachable") end
 end
 

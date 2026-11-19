@@ -572,11 +572,25 @@ function M.test_single_plain_scalar_document(testrun)
   local source = "yaml"
   local expected = {
     type = yaml.ParserNodeType.Root,
+    indent = 0,
     content = {
       type = yaml.ParserNodeType.Scalar,
       content = "yaml",
       indent = 0,
     },
+  }
+
+  local document = generate_document(source)
+  local status, msg = check_document(expected, document)
+  return test_result(testrun, status, msg)
+end
+
+function M.test_empty_document(testrun)
+  local source = ""
+  local expected = {
+    type = yaml.ParserNodeType.Root,
+    indent = 0,
+    content = {},
   }
 
   local document = generate_document(source)
@@ -590,6 +604,7 @@ function M.test_simple_sequence_document(testrun)
 - item 2]]
   local expected = {
     type = yaml.ParserNodeType.Root,
+    indent = 0,
     content = {
       type = yaml.ParserNodeType.Sequence,
       indent = 0,
