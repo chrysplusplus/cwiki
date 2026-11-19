@@ -738,6 +738,7 @@ local ParserNodeType = enum {
   "Scalar",
   "Sequence",
   "Mapping",
+  "MappingEntry",
 }
 
 local ParserContext = enum {
@@ -752,6 +753,9 @@ local ParserContext = enum {
   "ExpectIndentOrMappingInSequence",
   "ExpectingSequence",
   "ExpectDocumentEnd",
+  "ExpectBlockMapValue",
+  "ExpectBlockMapKey",
+  "ExpectMapInBlockMap",
 }
 
 if DEBUG then
@@ -794,10 +798,16 @@ local function adopt_node(parent, child)
   if parent.type == ParserNodeType.Sequence then
     table.insert(parent.content, child)
   elseif parent.type == ParserNodeType.Mapping then
-    error "Not implemented"
+    assert(child.type == ParserNodeType.MappingEntry)
+    table.insert(parent.content, child)
   elseif parent.type == ParserNodeType.Root then
     parent.content = child
+  elseif parent.type == ParserNodeType.MappingEntry then
+    parent.value = child
   else
+    if TRACE then
+      print(string.format("parent ParserNodeType.%s, child ParserNodeType.%s", enum_to_string(ParserNodeType, parent.type), enum_to_string(ParserNodeType, child.type)))
+    end
     error "Invalid token type for parent node"
   end
   return parent
@@ -928,7 +938,20 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.Finished)
 
     elseif ttype == TokenType.MapValue then
-      error("Not implemented")
+      local key_node = table.remove(self.node_stack)
+      self:push_node_to_stack{
+        type = ParserNodeType.Mapping,
+        content = {},
+        indent = self.current_indent,
+      }
+      self:push_node_to_stack{
+        type = ParserNodeType.MappingEntry,
+        key = key_node,
+        value = {},
+        indent = self.current_indent,
+      }
+      return self:set_context(ParserContext.ExpectBlockMapValue)
+
     else
       error("Not implemented")
     end
@@ -1011,9 +1034,103 @@ function Parser:parse_token(token)
     else
       error(string.format("Unexpected token type TokenType.%s", enum_to_string(TokenType, ttype)))
     end
+
+  elseif self.context == ParserContext.ExpectBlockMapValue then
+    if ttype == TokenType.DocumentEnd or ttype == TokenType.MapValue or ttype == TokenType.SeqEnd or ttype == TokenType.MapEnd or ttype == TokenType.Collect then
+      error "Not permitted"
+
+    elseif ttype == TokenType.BlockIndent then
+      self.current_indent = assert(token.indent)
+      return
+
+    elseif ttype == TokenType.SingleQuote then
+      error "Not implemented"
+    elseif ttype == TokenType.DoubleQuote then
+      error "Not implemented"
+    elseif ttype == TokenType.Folded then
+      error "Not implemented"
+    elseif ttype == TokenType.SeqBegin then
+      error "Not implemented"
+    elseif ttype == TokenType.MapBegin then
+      error "Not implemented"
+    elseif ttype == TokenType.Anchor then
+      error "Not implemented"
+    elseif ttype == TokenType.Alias then
+      error "Not implemented"
+    elseif ttype == TokenType.Seq then
+      error "Not implemented"
+
+    elseif ttype == TokenType.PlainScalar then
+      self:push_node_to_stack{
+        type = ParserNodeType.Scalar,
+        indent = assert(token.col),
+        token = token,
+        content = token.text,
+      }
+      return self:set_context(ParserContext.ExpectBlockMapKey)
+
+    elseif ttype == TokenType.UnescapedScalar then
+      error "Not implemented"
+    elseif ttype == TokenType.EscapedScalar then
+      error "Not implemented"
+    end
+
+  elseif self.context == ParserContext.ExpectBlockMapKey then
+    if ttype == TokenType.Folded or ttype == TokenType.SeqEnd or ttype == TokenType.MapEnd or ttype == TokenType.Collect or ttype == TokenType.Seq then
+      error "Not permitted"
+
+    elseif ttype == TokenType.BlockIndent then
+      self.current_indent = assert(token.indent)
+      return
+
+    elseif ttype == TokenType.DocumentEnd then
+      self.token_stream:push(token)
+      self.token_stream:push{ type = TokenType.BlockIndent, indent = 0 }
+      return self:set_context(ParserContext.ExpectDocumentEnd)
+
+    elseif ttype == TokenType.SingleQuote then
+      error "Not implemented"
+    elseif ttype == TokenType.DoubleQuote then
+      error "Not implemented"
+    elseif ttype == TokenType.MapValue then
+      error "Not implemented"
+    elseif ttype == TokenType.SeqBegin then
+      error "Not implemented"
+    elseif ttype == TokenType.MapBegin then
+      error "Not implemented"
+    elseif ttype == TokenType.Anchor then
+      error "Not implemented"
+    elseif ttype == TokenType.Alias then
+      error "Not implemented"
+
+    elseif ttype == TokenType.PlainScalar then
+      self:push_node_to_stack{
+        type = ParserNodeType.Scalar,
+        indent = self.current_indent,
+        content = token.text,
+        token = token,
+      }
+      return self:set_context(ParserContext.ExpectMapInBlockMap)
+
+    elseif ttype == TokenType.UnescapedScalar then
+      error "Not implemented"
+    elseif ttype == TokenType.EscapedScalar then
+      error "Not implemented"
+    end
+
+  elseif self.context == ParserContext.ExpectMapInBlockMap then
+    assert(ttype == TokenType.MapValue)
+    local key_node = table.remove(self.node_stack)
+    self:push_node_to_stack{
+      type = ParserNodeType.MappingEntry,
+      indent = self.current_indent,
+      key = key_node,
+      value = {},
+    }
+    return self:set_context(ParserContext.ExpectBlockMapValue)
   end
 
-  if TRACE then print("ParserContxt." .. util.enum_to_string(ParserContext, self.context)) end
+  if TRACE then print("ParserContext." .. util.enum_to_string(ParserContext, self.context)) end
   if DEBUG then assert(false, "Unreachable") end
 end
 

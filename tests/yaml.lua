@@ -85,6 +85,9 @@ local function generate_document(source)
   local parser = yaml.Parser:new(source)
   for t in parser.token_stream:iter() do
     parser:parse_token(t)
+    if TRACE and DEBUG then
+      print(util.dump_table(parser.node_stack))
+    end
   end
   return parser.document_tree
 end
@@ -601,7 +604,10 @@ end
 function M.test_simple_sequence_document(testrun)
   local source = [[
 - item 1
-- item 2]]
+- item 2
+- item 3
+- item 4
+- item 5]]
   local expected = {
     type = yaml.ParserNodeType.Root,
     indent = 0,
@@ -618,6 +624,69 @@ function M.test_simple_sequence_document(testrun)
           type = yaml.ParserNodeType.Scalar,
           content = "item 2",
           indent = 2,
+        },
+        {
+          type = yaml.ParserNodeType.Scalar,
+          content = "item 3",
+          indent = 2,
+        },
+        {
+          type = yaml.ParserNodeType.Scalar,
+          content = "item 4",
+          indent = 2,
+        },
+        {
+          type = yaml.ParserNodeType.Scalar,
+          content = "item 5",
+          indent = 2,
+        },
+      },
+    },
+  }
+
+  local document = generate_document(source)
+  local status, msg = check_document(expected, document)
+  return test_result(testrun, status, msg)
+end
+
+function M.test_simple_mapping_document(testrun)
+  local source = [[
+key 1: value 1
+key 2: value 2]]
+  local expected = {
+    type = yaml.ParserNodeType.Root,
+    indent = 0,
+    content = {
+      type = yaml.ParserNodeType.Mapping,
+      indent = 0,
+      content = {
+        {
+          type = yaml.ParserNodeType.MappingEntry,
+          indent = 0,
+          key = {
+            type = yaml.ParserNodeType.Scalar,
+            content = "key 1",
+            indent = 0,
+          },
+          value = {
+            type = yaml.ParserNodeType.Scalar,
+            content = "value 1",
+            indent = 0,
+          },
+        },
+        {
+          type = yaml.ParserNodeType.MappingEntry,
+          indent = 0,
+          key = {
+            type = yaml.ParserNodeType.Scalar,
+            content = "key 2",
+            indent = 0,
+          },
+          value = {
+            type = yaml.ParserNodeType.Scalar,
+            content = "value 2",
+            indent = 0,
+          },
         },
       },
     },
