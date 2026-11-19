@@ -795,8 +795,10 @@ local function adopt_node(parent, child)
     table.insert(parent.content, child)
   elseif parent.type == ParserNodeType.Mapping then
     error "Not implemented"
-  else
+  elseif parent.type == ParserNodeType.Root then
     parent.content = child
+  else
+    error "Invalid token type for parent node"
   end
   return parent
 end
@@ -806,17 +808,22 @@ function Parser:get_last_node()
   return assert(self.node_stack[#self.node_stack])
 end
 
--- Push a node onto the parser stack, combining the stack if the indent of the
--- received node is less than that at the top of the stack
-function Parser:push_node_to_stack(node)
-  if #self.node_stack == 0 then self.node_stack[1] = node; return end
-  local next_indent = assert(node.indent)
+-- Pop the nodes the stack and adopt them as child nodes until the indent level
+-- of the top node in the stack matches the received indent
+function Parser:pop_stack_to_indent_level(indent)
   local prev_indent = assert(self:get_last_node().indent)
-  while next_indent < prev_indent do
+  while indent < prev_indent do
     local child = table.remove(self.node_stack)
     adopt_node(self:get_last_node(), child)
     prev_indent = assert(self:get_last_node().indent)
   end
+end
+
+-- Push a node onto the parser stack, combining the stack if the indent of the
+-- received node is less than that at the top of the stack
+function Parser:push_node_to_stack(node)
+  if #self.node_stack == 0 then self.node_stack[1] = node; return end
+  self:pop_stack_to_indent_level(assert(node.indent))
   table.insert(self.node_stack, node)
 end
 
@@ -852,8 +859,8 @@ function Parser:parse_token(token)
       error("Not implemented")
 
     elseif ttype == TokenType.DocumentEnd then
-      self.token_stream.push(token)
-      self.token_stream.push{ type = TokenType.BlockIndent, indent = 0 }
+      self.token_stream:push(token)
+      self.token_stream:push{ type = TokenType.BlockIndent, indent = 0 }
       return self:set_context(ParserContext.ExpectDocumentEnd)
 
     elseif ttype == TokenType.SingleQuote then
@@ -964,8 +971,8 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.ExpectingSequence)
 
     elseif ttype == TokenType.DocumentEnd then
-      self.token_stream.push(token)
-      self.token_stream.push{ type = TokenType.BlockIndent, indent = 0 }
+      self.token_stream:push(token)
+      self.token_stream:push{ type = TokenType.BlockIndent, indent = 0 }
       return self:set_context(ParserContext.ExpectDocumentEnd)
 
     elseif ttype == TokenType.MapValue then
@@ -984,10 +991,25 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.ExpectDocumentEnd)
 
     elseif ttype == TokenType.Seq then
+      self:pop_stack_to_indent_level(self.current_indent)
+      self.current_indent = self.current_indent + 2
       return self:set_context(ParserContext.InBlockSequence)
 
     else
       error "Not implemented"
+    end
+
+  elseif self.context == ParserContext.ExpectDocumentEnd then
+    if ttype == TokenType.BlockIndent then
+      self.current_indent = assert(token.indent)
+      return
+
+    elseif ttype == TokenType.DocumentEnd then
+      self:finalise_document()
+      return
+
+    else
+      error(string.format("Unexpected token type TokenType.%s", enum_to_string(TokenType, ttype)))
     end
   end
 
