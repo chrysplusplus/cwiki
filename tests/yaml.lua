@@ -85,9 +85,6 @@ local function generate_document(source)
   local parser = yaml.Parser:new(source)
   for t in parser.token_stream:iter() do
     parser:parse_token(t)
-    if TRACE and DEBUG then
-      print(util.dump_table(parser.node_stack))
-    end
   end
   return parser.document_tree
 end
@@ -441,6 +438,11 @@ function M.test_flow_special_characters_tokens(testrun)
 end
 
 function M.test_flow_plain_scalar_tokens(testrun)
+  local source = [[
+one* two& three, four} five{ six] seven[ eight: nine"" ten# comment
+eleven
+twelve'
+thirteen]]
   local expected = {
     { type = TokenType.PlainScalar, text = "one", line = 1, col = 1 },
     { type = TokenType.Alias, text = "*", line = 1, col = 4 },
@@ -468,7 +470,7 @@ function M.test_flow_plain_scalar_tokens(testrun)
     { type = TokenType.PlainScalar, text = "thirteen", line = 4, col = 1 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_flow_tokens("one* two& three, four} five{ six] seven[ eight: nine\"\" ten# comment\neleven\ntwelve'\nthirteen", #expected)
+  local tokens = generate_flow_tokens(source, #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -575,7 +577,6 @@ function M.test_single_plain_scalar_document(testrun)
   local source = "yaml"
   local expected = {
     type = yaml.ParserNodeType.Root,
-    indent = 0,
     content = {
       type = yaml.ParserNodeType.Scalar,
       content = "yaml",
@@ -592,7 +593,6 @@ function M.test_empty_document(testrun)
   local source = ""
   local expected = {
     type = yaml.ParserNodeType.Root,
-    indent = 0,
     content = {},
   }
 
@@ -610,7 +610,6 @@ function M.test_simple_sequence_document(testrun)
 - item 5]]
   local expected = {
     type = yaml.ParserNodeType.Root,
-    indent = 0,
     content = {
       type = yaml.ParserNodeType.Sequence,
       indent = 0,
@@ -655,7 +654,6 @@ key 1: value 1
 key 2: value 2]]
   local expected = {
     type = yaml.ParserNodeType.Root,
-    indent = 0,
     content = {
       type = yaml.ParserNodeType.Mapping,
       indent = 0,
@@ -695,6 +693,23 @@ key 2: value 2]]
   local document = generate_document(source)
   local status, msg = check_document(expected, document)
   return test_result(testrun, status, msg)
+end
+
+function M.test_debug_parser_context_coverage(testrun)
+  if not DEBUG then return end
+  for context = 1, util.enum_max(yaml.ParserContext) do
+    local parser = yaml.Parser:new ""
+    parser.context = context
+    local status, err = pcall(parser.parse_token, parser, { type = TokenType.DocumentEnd })
+    if not status and err:find("Unreachable") then
+      return report_fail(testrun, string.format("Missing coverage for %s", util.enum_to_string(yaml.ParserContext, context)))
+    end
+  end
+  return report_pass(testrun)
+end
+
+function M.test_nested_mapping(testrun)
+  return common.dummy_test(testrun)
 end
 
 return M

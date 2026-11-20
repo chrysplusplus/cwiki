@@ -3,6 +3,13 @@
 
 local M = {}
 
+-- Debug assert
+if DEBUG then
+  M.dassert = assert
+else
+  M.dassert = function (...) return ... end
+end
+
 -- Dump a table to a string
 function M.dump_table(t)
   if type(t) == "table" then
