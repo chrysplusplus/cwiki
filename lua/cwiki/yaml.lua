@@ -746,11 +746,17 @@ local ParserContext = enum {
   "Finished",
   "AtRoot",
   "DetermineBlockSequenceIndent",
-  "ExpectSequenceEntry",
-  "HandleSequenceContinuation",
+  "ExpectAnchorAlias",
+  "ExpectAnchorDefinition",
+  "ExpectEscapedScalar",
   "ExpectMappingValue",
-  "HandleMappingContinuation",
   "ExpectMappingValueIndicator",
+  "ExpectSequenceEntry",
+  "ExpectUnescapedScalar",
+  "HandleMappingContinuation",
+  "HandleSequenceContinuation",
+  "InFlowSequence",
+  "InFlowMapping"
 }
 
 if DEBUG then
@@ -1012,7 +1018,7 @@ function Parser:parse_token(token)
 
     elseif ttype == TokenType.MapBegin then
       self.tokeniser:use_flow_context()
-      return self:set_context(ParserContext.InFlowSequence)
+      return self:set_context(ParserContext.InFlowMapping)
 
     elseif ttype == TokenType.Anchor then
       return self:set_context(ParserContext.ExpectAnchorDefinition)
@@ -1079,6 +1085,24 @@ function Parser:parse_token(token)
   elseif self.context == ParserContext.ExpectMappingValueIndicator then
     dassert(ttype == TokenType.MapValue)
     return self:set_context(ParserContext.ExpectMappingValue)
+
+  elseif self.context == ParserContext.ExpectAnchorAlias then
+    error "Not implemented"
+
+  elseif self.context == ParserContext.ExpectAnchorDefinition then
+    error "Not implemented"
+
+  elseif self.context == ParserContext.ExpectEscapedScalar then
+    error "Not implemented"
+
+  elseif self.context == ParserContext.ExpectUnescapedScalar then
+    error "Not implemented"
+
+  elseif self.context == ParserContext.InFlowSequence then
+    error "Not implemented"
+
+  elseif self.context == ParserContext.InFlowMapping then
+    error "Not implemented"
   end
 
   if DEBUG then error "Unreachable" end
