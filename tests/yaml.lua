@@ -1242,11 +1242,11 @@ function M.test_flow_sequence_document(testrun)
           key = {
             type = yaml.ParserNodeType.Scalar,
             indent = 0,
-            content = "saying",
+            content = "list",
           },
           value = {
             type = yaml.ParserNodeType.Sequence,
-            indent = 2,
+            indent = 0,
             content = {
               {
                 type = yaml.ParserNodeType.Scalar,

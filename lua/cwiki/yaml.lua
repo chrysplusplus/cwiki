@@ -762,6 +762,7 @@ local ParserContext = enum {
   "ExpectFlowMapValueIndicator",
   "ExpectFlowMapValue",
   "PostFlowMapValue",
+  "PostFlowSequenceEntry",
 }
 
 if DEBUG then
@@ -924,7 +925,14 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.ExpectMappingValue)
 
     elseif ttype == TokenType.SeqBegin then
+      self:push_node_to_stack{
+        type = ParserNodeType.Sequence,
+        content = {},
+        indent = self.current_indent,
+        _token = token,
+      }
       self.tokeniser:use_flow_context()
+      self.restore_context = self.context
       return self:set_context(ParserContext.InFlowSequence)
 
     elseif ttype == TokenType.MapBegin then
@@ -1064,7 +1072,14 @@ function Parser:parse_token(token)
       error "Not implemented"
 
     elseif ttype == TokenType.SeqBegin then
+      self:push_node_to_stack{
+        type = ParserNodeType.Sequence,
+        content = {},
+        indent = self.current_indent,
+        _token = token,
+      }
       self.tokeniser:use_flow_context()
+      self.restore_context = ParserContext.HandleMappingContinuation
       return self:set_context(ParserContext.InFlowSequence)
 
     elseif ttype == TokenType.MapBegin then
@@ -1195,7 +1210,35 @@ function Parser:parse_token(token)
     return self:set_context(restore_context)
 
   elseif self.context == ParserContext.InFlowSequence then
-    error "Not implemented"
+    if ttype == TokenType.SeqEnd then
+      error "Not implemented"
+
+    elseif is_scalar_token(token) then
+      self:push_node_to_stack{
+        type = ParserNodeType.Scalar,
+        content = dassert(token.text),
+      }
+      return self:set_context(ParserContext.PostFlowSequenceEntry)
+
+    else
+      error "Unexpected token"
+    end
+
+  elseif self.context == ParserContext.PostFlowSequenceEntry then
+    if ttype == TokenType.SeqEnd then
+      self:pop_and_adopt() -- entry
+      self:pop_and_adopt() -- sequence
+      local restore_context = self.restore_context
+      self.restore_context = nil
+      return self:set_context(restore_context)
+
+    elseif ttype == TokenType.Collect then
+      self:pop_and_adopt()
+      return self:set_context(ParserContext.InFlowSequence)
+
+    else
+      error "Unexpected token"
+    end
 
   elseif self.context == ParserContext.InFlowMapping then
     if ttype == TokenType.MapEnd then
