@@ -926,7 +926,7 @@ function Parser:parse_token(token)
 
     elseif ttype == TokenType.MapBegin then
       self.tokeniser:use_flow_context()
-      return self:set_context(ParserContext.InFlowSequence)
+      return self:set_context(ParserContext.InFlowMapping)
 
     elseif ttype == TokenType.Anchor then
       self.restore_context = self.context

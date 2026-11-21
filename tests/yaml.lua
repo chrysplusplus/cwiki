@@ -1282,7 +1282,7 @@ function M.test_flow_mapping_document(testrun)
           key = {
             type = yaml.ParserNodeType.Scalar,
             indent = 0,
-            content = "saying",
+            content = "stuff",
           },
           value = {
             type = yaml.ParserNodeType.Mapping,
@@ -1319,6 +1319,112 @@ function M.test_flow_mapping_document(testrun)
   local document = generate_document(source)
   local status, msg = check_document(expected, document)
   return test_result(testrun, status, msg)
+end
+
+function M.test_nested_flow_document(testrun)
+  local source = "more stuff: {intro: [no, {one: 1}, [knows]], outro: {count: 2, phenome: try}}"
+  local expected = {
+    type = yaml.ParserNodeType.Root,
+    content = {
+      type = yaml.ParserNodeType.Mapping,
+      indent = 0,
+      content = {
+        {
+          type = yaml.ParserNodeType.MappingEntry,
+          indent = 0,
+          key = {
+            type = yaml.ParserNodeType.Scalar,
+            indent = 0,
+            content = "more stuff",
+          },
+          value = {
+            type = yaml.ParserNodeType.Mapping,
+            indent = 2,
+            content = {
+              {
+                type = yaml.ParserNodeType.MappingEntry,
+                key = {
+                  type = yaml.ParserNodeType.Scalar,
+                  content = "intro",
+                },
+                value = {
+                  type = yaml.ParserNodeType.Sequence,
+                  content = {
+                    {
+                      type = yaml.ParserNodeType.Scalar,
+                      content = "no",
+                    },
+                    {
+                      type = yaml.ParserNodeType.Mapping,
+                      content = {
+                        {
+                          type = yaml.ParserNodeType.MappingEntry,
+                          key = {
+                            type = yaml.ParserNodeType.Scalar,
+                            content = "one",
+                          },
+                          value = {
+                            type = yaml.ParserNodeType.Scalar,
+                            content = "1",
+                          },
+                        },
+                      },
+                    },
+                    {
+                      type = yaml.ParserNodeType.Sequence,
+                      content = {
+                        {
+                          type = yaml.ParserNodeType.Scalar,
+                          content = "knows"
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+              {
+                type = yaml.ParserNodeType.MappingEntry,
+                key = {
+                  type = yaml.ParserNodeType.Scalar,
+                  content = "outro",
+                },
+                value = {
+                  type = yaml.ParserNodeType.Mapping,
+                  content = {
+                    {
+                      type = yaml.ParserNodeType.MappingEntry,
+                      key = {
+                        type = yaml.ParserNodeType.Scalar,
+                        content = "count",
+                      },
+                      value = {
+                        type = yaml.ParserNodeType.Scalar,
+                        content = "2",
+                      },
+                    },
+                    {
+                      type = yaml.ParserNodeType.MappingEntry,
+                      key = {
+                        type = yaml.ParserNodeType.Scalar,
+                        content = "phenome",
+                      },
+                      value = {
+                        type = yaml.ParserNodeType.Scalar,
+                        content = "try",
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  }
+  local document = generate_document(source)
+  local status, err = check_document(expected, document)
+  return test_result(testrun, status, err)
 end
 
 return M
