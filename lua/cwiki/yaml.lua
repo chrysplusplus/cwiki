@@ -763,6 +763,8 @@ local ParserContext = enum {
   "ExpectFlowMapValue",
   "PostFlowMapValue",
   "PostFlowSequenceEntry",
+  "ExpectFoldIndent",
+  "InFoldedScalar",
 }
 
 if DEBUG then
@@ -795,6 +797,7 @@ function Parser:new(source)
     current_anchor = nil,
     anchor_definitions = {},
     current_scalar_token = nil,
+    folded_indent = 0,
   }
   setmetatable(obj, {__index = self})
   return obj
@@ -875,9 +878,44 @@ function Parser:pop_all_nodes()
   }
 end
 
+-- Predicate for whether the token type is considered a scalar type
 local function is_scalar_token(token)
   local ttype = dassert(token.type)
   return ttype == TokenType.PlainScalar or ttype == TokenType.UnescapedScalar or ttype == TokenType.EscapedScalar
+end
+
+-- Fold lines according to folded scalar rules
+local function fold_lines(lines)
+  local nlines = #lines
+  if nlines == 0 then return "" end
+  if nlines == 1 then return lines[1] end
+  local text = lines[1]
+  local was_last_indented = false
+  for i = 2, nlines do
+    local l = lines[i]
+    if l:find("^ ") then
+      text = text .. "\n" .. l
+      was_last_indented = true
+    elseif l:find("^$") then
+      text = text .. "\n"
+    elseif was_last_indented then
+      text = text .. "\n" .. l
+      was_last_indented = false
+    else
+      text = text .. " " .. l
+    end
+  end
+  return text
+end
+
+if DEBUG then
+  M.fold_lines = fold_lines
+end
+
+-- Fold the lines table in the received token to its text field and return the result
+local function fold_lines_in_token(token)
+  token.text = fold_lines(dassert(token.lines))
+  return token
 end
 
 -- TODO test TokenType coverage
@@ -907,7 +945,9 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.ExpectEscapedScalar)
 
     elseif ttype == TokenType.Folded then
-      error "Not implemented"
+      self.tokeniser:use_folded_context()
+      self.restore_context = self.context
+      return self:set_context(ParserContext.ExpectFoldIndent)
 
     elseif ttype == TokenType.MapValue then
       local key_node = dassert(table.remove(self.node_stack))
@@ -1066,7 +1106,9 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.ExpectEscapedScalar)
 
     elseif ttype == TokenType.Folded then
-      error "Not implemented"
+      self.tokeniser:use_folded_context()
+      self.restore_context = self.context
+      return self:set_context(ParserContext.ExpectFoldIndent)
 
     elseif ttype == TokenType.MapValue then
       error "Not implemented"
@@ -1298,6 +1340,55 @@ function Parser:parse_token(token)
       self:pop_and_adopt() -- entry
       self:pop_and_adopt() -- mapping
       local restore_context = self.restore_context
+      self.restore_context = nil
+      return self:set_context(restore_context)
+
+    else
+      error "Unexpected token"
+    end
+
+  elseif self.context == ParserContext.ExpectFoldIndent then
+    if ttype == TokenType.FoldIndent then
+      local folded_indent = dassert(token.indent)
+      if folded_indent == 0 then return end
+      self.folded_indent = folded_indent
+      self.current_scalar_token = {
+        type = TokenType.PlainScalar,
+        indent = self.current_indent,
+        lines = {},
+      }
+      self.current_indent = folded_indent
+      return self:set_context(ParserContext.InFoldedScalar)
+
+    elseif ttype == TokenType.FoldNewline then
+      return
+
+    else
+      error "Expected indented line after fold indicator"
+    end
+
+  elseif self.context == ParserContext.InFoldedScalar then
+    if ttype == TokenType.FoldLine then
+      if self.current_indent == self.folded_indent then
+        table.insert(self.current_scalar_token.lines, token.text)
+        return
+      else
+        error "Not implemented"
+      end
+
+    elseif ttype == TokenType.FoldIndent then
+      self.current_indent = dassert(token.indent)
+      return
+
+    elseif ttype == TokenType.FoldNewline then
+      error "Not implemented"
+
+    elseif ttype == TokenType.DocumentEnd then
+      self.token_stream:push(token)
+      self.token_stream:push(fold_lines_in_token(self.current_scalar_token))
+      self.current_indent = self.current_scalar_token.indent
+      self.current_scalar_token = nil
+      local restore_context = dassert(self.restore_context)
       self.restore_context = nil
       return self:set_context(restore_context)
 

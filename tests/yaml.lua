@@ -745,7 +745,7 @@ function M.test_folded_scalar_document(testrun)
     content = {
       type = yaml.ParserNodeType.Scalar,
       content = "line one. still line one.\n  Indented section; line one\n\n  Indented section; line two\n\nnext paragraphs starts here and wraps very nicely.",
-      indent = 0
+      indent = 0,
     },
   }
   local document = generate_document(source)
@@ -868,6 +868,23 @@ list 3:
   return test_result(testrun, status, msg)
 end
 
+function M.test_folded_scalar_document(testrun)
+  local source = [[>
+    A simple sentence is a sentence having no coordinate or
+    subordinate clauses.]]
+  local expected = {
+    type = yaml.ParserNodeType.Root,
+    content = {
+      type = yaml.ParserNodeType.Scalar,
+      indent = 0,
+      content = "A simple sentence is a sentence having no coordinate or subordinate clauses.",
+    },
+  }
+  local document = generate_document(source)
+  local status, msg = check_document(expected, document)
+  return test_result(testrun, status, msg)
+end
+
 function M.test_folded_map_value_document(testrun)
   local source = [[
 title: Bad Times
@@ -875,7 +892,15 @@ author: A. Bangman
 description: >
   Two boys went out to the villa on the mountains and
   they didn't ever come back. Tim E. Wonk goes to
-  investigate.]]
+  investigate.
+
+    "A wonderful exploration of madness and civilisation"
+    -- Foucault
+
+  Get it!!
+
+  Now!!
+length: 154 pages]]
   local expected = {
     type = yaml.ParserNodeType.Root,
     content = {
@@ -921,7 +946,21 @@ description: >
           value = {
             type = yaml.ParserNodeType.Scalar,
             indent = 0,
-            content = "Two boys went out to the villa on the mountains and they didn't ever come back. Tim E. Wonk goes to investigate.",
+            content = "Two boys went out to the villa on the mountains and they didn't ever come back. Tim E. Wonk goes to investigate.\n\n  \"A wonderful exploration of madness and civilisation\"\n  -- Foucault\n\nGet it!!\nNow!!",
+          },
+        },
+        {
+          type = yaml.ParserNodeType.MappingEntry,
+          indent = 0,
+          key = {
+            type = yaml.ParserNodeType.Scalar,
+            indent = 0,
+            content = "length",
+          },
+          value = {
+            type = yaml.ParserNodeType.Scalar,
+            indent = 0,
+            content = "154 pages",
           },
         },
       },
