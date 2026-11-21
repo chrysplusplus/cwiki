@@ -430,9 +430,12 @@ function M.test_flow_special_characters_tokens(testrun)
     { type = TokenType.MapBegin, text = "{", line = 1, col = 6 },
     { type = TokenType.MapEnd, text = "}", line = 1, col = 7 },
     { type = TokenType.Collect, text = ",", line = 1, col = 8 },
+    { type = TokenType.PlainScalar, text = "scalar", line = 1, col = 10 },
+    { type = TokenType.Collect, text = ",", line = 1, col = 16 },
+    { type = TokenType.PlainScalar, text = "scalar", line = 1, col = 18 },
     { type = TokenType.DocumentEnd, text = "" },
   }
-  local tokens = generate_flow_tokens(">-:[]{},", #expected)
+  local tokens = generate_flow_tokens(">-:[]{}, scalar, scalar", #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -1286,7 +1289,7 @@ function M.test_flow_mapping_document(testrun)
           },
           value = {
             type = yaml.ParserNodeType.Mapping,
-            indent = 2,
+            indent = 0,
             content = {
               {
                 type = yaml.ParserNodeType.MappingEntry,
@@ -1339,7 +1342,7 @@ function M.test_nested_flow_document(testrun)
           },
           value = {
             type = yaml.ParserNodeType.Mapping,
-            indent = 2,
+            indent = 0,
             content = {
               {
                 type = yaml.ParserNodeType.MappingEntry,

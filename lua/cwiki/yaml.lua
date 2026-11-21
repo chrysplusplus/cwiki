@@ -759,6 +759,9 @@ local ParserContext = enum {
   "InFlowMapping",
   "ExpectDoubleQuote",
   "ExpectSingleQuote",
+  "ExpectFlowMapValueIndicator",
+  "ExpectFlowMapValue",
+  "PostFlowMapValue",
 }
 
 if DEBUG then
@@ -925,7 +928,14 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.InFlowSequence)
 
     elseif ttype == TokenType.MapBegin then
+      self:push_node_to_stack{
+        type = ParserNodeType.Mapping,
+        content = {},
+        indent = self.current_indent,
+        _token = token,
+      }
       self.tokeniser:use_flow_context()
+      self.restore_context = self.context
       return self:set_context(ParserContext.InFlowMapping)
 
     elseif ttype == TokenType.Anchor then
@@ -1058,7 +1068,14 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.InFlowSequence)
 
     elseif ttype == TokenType.MapBegin then
+      self:push_node_to_stack{
+        type = ParserNodeType.Mapping,
+        content = {},
+        indent = self.current_indent,
+        _token = token,
+      }
       self.tokeniser:use_flow_context()
+      self.restore_context = ParserContext.HandleMappingContinuation
       return self:set_context(ParserContext.InFlowMapping)
 
     elseif ttype == TokenType.Anchor then
@@ -1181,7 +1198,69 @@ function Parser:parse_token(token)
     error "Not implemented"
 
   elseif self.context == ParserContext.InFlowMapping then
-    error "Not implemented"
+    if ttype == TokenType.MapEnd then
+      error "Not implemented"
+
+    elseif is_scalar_token(token) then
+      self:push_node_to_stack{
+        type = ParserNodeType.MappingEntry,
+        key = {
+          type = ParserNodeType.Scalar,
+          content = dassert(token.text),
+        },
+        value = {},
+      }
+      return self:set_context(ParserContext.ExpectFlowMapValueIndicator)
+
+    else
+      error "Not allowed; only scalars can be used as keys"
+    end
+
+  elseif self.context == ParserContext.ExpectFlowMapValueIndicator then
+    if ttype ~= TokenType.MapValue then error "Expected mapping indicator" end
+    return self:set_context(ParserContext.ExpectFlowMapValue)
+
+  elseif self.context == ParserContext.ExpectFlowMapValue then
+    if ttype == TokenType.SeqBegin then
+      error "Not implemented"
+
+    elseif ttype == TokenType.MapBegin then
+      error "Not implemented"
+
+    elseif ttype == TokenType.Anchor then
+      error "Not implemented"
+
+    elseif ttype == TokenType.Alias then
+      error "Not implemented"
+
+    elseif is_scalar_token(token) then
+      self:push_node_to_stack{
+        type = ParserNodeType.Scalar,
+        content = dassert(token.text),
+      }
+      return self:set_context(ParserContext.PostFlowMapValue)
+
+    else
+      error "Unexpected token"
+    end
+
+  elseif self.context == ParserContext.PostFlowMapValue then
+    if ttype == TokenType.Collect then
+      self:pop_and_adopt() -- value
+      self:pop_and_adopt() -- entry
+      return self:set_context(ParserContext.InFlowMapping)
+
+    elseif ttype == TokenType.MapEnd then
+      self:pop_and_adopt() -- value
+      self:pop_and_adopt() -- entry
+      self:pop_and_adopt() -- mapping
+      local restore_context = self.restore_context
+      self.restore_context = nil
+      return self:set_context(restore_context)
+
+    else
+      error "Unexpected token"
+    end
   end
 
   if DEBUG then error "Unreachable" end
