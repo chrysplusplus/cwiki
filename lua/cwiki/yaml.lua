@@ -785,6 +785,9 @@ function Parser:new(source)
     document_tree = {},
     node_stack = {},
     current_indent = 0,
+    restore_context = nil,
+    current_anchor = nil,
+    anchor_definitions = {},
   }
   setmetatable(obj, {__index = self})
   return obj
@@ -825,6 +828,7 @@ function Parser:pop_stack_to_indent_level(indent)
   local prev_indent = dassert(self:get_last_node().indent)
   while indent < prev_indent do
     local child = table.remove(self.node_stack)
+    if child.anchor_name then self.anchor_definitions[child.anchor_name] = child end
     adopt_node(self:get_last_node(), child)
     prev_indent = dassert(self:get_last_node().indent)
   end
@@ -834,14 +838,19 @@ end
 -- that used to be below it in the stack
 function Parser:pop_and_adopt()
   local child = table.remove(self.node_stack)
+  if child.anchor_name then self.anchor_definitions[child.anchor_name] = child end
   adopt_node(self:get_last_node(), child)
 end
 
 -- Push a node onto the parser stack, combining the stack if the indent of the
 -- received node is less than that at the top of the stack
 function Parser:push_node_to_stack(node)
+  if self.current_anchor then
+    node.anchor_name = self.current_anchor
+    self.current_anchor = nil
+  end
   if #self.node_stack == 0 then self.node_stack[1] = node; return end
-  self:pop_stack_to_indent_level(dassert(node.indent))
+  -- self:pop_stack_to_indent_level(dassert(node.indent)) -- maybe remove
   table.insert(self.node_stack, node)
 end
 
@@ -850,6 +859,7 @@ end
 function Parser:pop_all_nodes()
   while #self.node_stack >= 2 do
     local child = table.remove(self.node_stack)
+    if child.anchor_name then self.anchor_definitions[child.anchor_name] = child end
     adopt_node(self:get_last_node(), child)
   end
   self.document_tree = {
@@ -914,10 +924,17 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.InFlowSequence)
 
     elseif ttype == TokenType.Anchor then
+      self.restore_context = self.context
       return self:set_context(ParserContext.ExpectAnchorDefinition)
 
     elseif ttype == TokenType.Alias then
+      self.restore_context = self.context
       return self:set_context(ParserContext.ExpectAnchorAlias)
+
+    elseif ttype == TokenType.AnchorName then
+      local node = self:get_last_node()
+      dassert(node.anchor_name == token.text)
+      return
 
     elseif ttype == TokenType.Seq then
       dassert(#self.node_stack == 0, "Unexpected token")
@@ -957,17 +974,34 @@ function Parser:parse_token(token)
     return self:set_context(ParserContext.ExpectSequenceEntry)
 
   elseif self.context == ParserContext.ExpectSequenceEntry then
-    if not is_scalar_token(token) then error(string.format("Token at line %d, column %d is disallowed", token.line or 0, token.col or 0)) end
-    local parent = dassert(self:get_last_node())
-    self.current_indent = (self.current_indent == parent.indent) and (dassert(token.col) - 1) or self.current_indent
-    dassert(self.current_indent == parent.child_indent, "Ambiguous indentation")
-    self:push_node_to_stack{
-      type = ParserNodeType.Scalar,
-      content = dassert(token.text),
-      indent = self.current_indent,
-      _token = token,
-    }
-    return self:set_context(ParserContext.HandleSequenceContinuation)
+    if is_scalar_token(token) then
+      local parent = dassert(self:get_last_node())
+      self.current_indent = (self.current_indent == parent.indent) and (dassert(token.col) - 1) or self.current_indent
+      dassert(self.current_indent == parent.child_indent, "Ambiguous indentation")
+      self:push_node_to_stack{
+        type = ParserNodeType.Scalar,
+        content = dassert(token.text),
+        indent = self.current_indent,
+        _token = token,
+      }
+      return self:set_context(ParserContext.HandleSequenceContinuation)
+
+    elseif ttype == TokenType.Anchor then
+      self.restore_context = self.context
+      return self:set_context(ParserContext.ExpectAnchorDefinition)
+
+    elseif ttype == TokenType.Alias then
+      self.restore_context = self.context
+      return self:set_context(ParserContext.ExpectAnchorAlias)
+
+    elseif ttype == TokenType.AnchorName then
+      local node = self:get_last_node()
+      dassert(node.anchor_name == token.text)
+      return self:set_context(ParserContext.HandleSequenceContinuation)
+
+    else
+      error(string.format("Token at line %d, column %d is disallowed", token.line or 0, token.col or 0))
+    end
 
   elseif self.context == ParserContext.HandleSequenceContinuation then
     if ttype == TokenType.BlockIndent then
@@ -1021,10 +1055,17 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.InFlowMapping)
 
     elseif ttype == TokenType.Anchor then
+      self.restore_context = self.context
       return self:set_context(ParserContext.ExpectAnchorDefinition)
 
     elseif ttype == TokenType.Alias then
+      self.restore_context = self.context
       return self:set_context(ParserContext.ExpectAnchorAlias)
+
+    elseif ttype == TokenType.Alias then
+      local node = self:get_last_node()
+      dassert(node.anchor_name == token.text)
+      return self:set_context(ParserContext.HandleMappingContinuation)
 
     elseif ttype == TokenType.Seq then
       error "Not implemented"
@@ -1087,10 +1128,21 @@ function Parser:parse_token(token)
     return self:set_context(ParserContext.ExpectMappingValue)
 
   elseif self.context == ParserContext.ExpectAnchorAlias then
-    error "Not implemented"
+    dassert(ttype == TokenType.AnchorName, "Expected anchor name")
+    local node = self.anchor_definitions[dassert(token.text)]
+    if not node then error(string.format("Undefined anchor: %s", token.text)) end
+    self:push_node_to_stack(node)
+    self.token_stream:push(token)
+    local restore_context = dassert(self.restore_context)
+    self.restore_context = nil
+    return self:set_context(restore_context)
 
   elseif self.context == ParserContext.ExpectAnchorDefinition then
-    error "Not implemented"
+    dassert(ttype == TokenType.AnchorName, "Expected anchor name")
+    self.current_anchor = dassert(token.text)
+    local restore_context = dassert(self.restore_context)
+    self.restore_context = nil
+    return self:set_context(restore_context)
 
   elseif self.context == ParserContext.ExpectEscapedScalar then
     error "Not implemented"

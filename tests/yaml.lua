@@ -1148,6 +1148,9 @@ function M.test_anchor_document(testrun)
       },
     },
   }
+  local document = generate_document(source)
+  local status, msg = check_document(expected, document)
+  return test_result(testrun, status, msg)
 end
 
 function M.test_bad_anchor_document(testrun)
@@ -1156,17 +1159,26 @@ function M.test_bad_anchor_document(testrun)
 end
 
 function M.test_escaped_scalar_document(testrun)
-  local source = [[- "very\tdifficult\tto\tpronounce"]]
+  local source = [[name: "very\tdifficult\tto\tpronounce"]]
   local expected = {
     type = yaml.ParserNodeType.Root,
     content = {
-      type = yaml.ParserNodeType.Sequence,
+      type = yaml.ParserNodeType.Mapping,
       indent = 0,
       content = {
         {
-          type = yaml.ParserNodeType.Scalar,
-          indent = 2,
-          content = "very\tdifficult\tto\tpronounce",
+          type = yaml.ParserNodeType.MappingEntry,
+          indent = 0,
+          key = {
+            type = yaml.ParserNodeType.Scalar,
+            indent = 0,
+            content = "name",
+          },
+          value = {
+            type = yaml.ParserNodeType.Scalar,
+            indent = 0,
+            content = "very\tdifficult\tto\tpronounce",
+          },
         },
       },
     },
@@ -1177,17 +1189,26 @@ function M.test_escaped_scalar_document(testrun)
 end
 
 function M.test_unescaped_scalar_document(testrun)
-  local source = [[- 'And it''s not hard']]
+  local source = [[saying: 'It''s not hard']]
   local expected = {
     type = yaml.ParserNodeType.Root,
     content = {
-      type = yaml.ParserNodeType.Sequence,
+      type = yaml.ParserNodeType.Mapping,
       indent = 0,
       content = {
         {
-          type = yaml.ParserNodeType.Scalar,
-          indent = 2,
-          content = "And it's not hard",
+          type = yaml.ParserNodeType.MappingEntry,
+          indent = 0,
+          key = {
+            type = yaml.ParserNodeType.Scalar,
+            indent = 0,
+            content = "saying",
+          },
+          value = {
+            type = yaml.ParserNodeType.Scalar,
+            indent = 0,
+            content = "It's not hard",
+          },
         },
       },
     },
@@ -1198,28 +1219,37 @@ function M.test_unescaped_scalar_document(testrun)
 end
 
 function M.test_flow_sequence_document(testrun)
-  local source = "- [item 1, item 2, item 3]"
+  local source = "list: [item 1, item 2, item 3]"
   local expected = {
     type = yaml.ParserNodeType.Root,
     content = {
-      type = yaml.ParserNodeType.Sequence,
+      type = yaml.ParserNodeType.Mapping,
       indent = 0,
       content = {
         {
-          type = yaml.ParserNodeType.Sequence,
-          indent = 2,
-          content = {
-            {
-              type = yaml.ParserNodeType.Scalar,
-              content = "item 1",
-            },
-            {
-              type = yaml.ParserNodeType.Scalar,
-              content = "item 2",
-            },
-            {
-              type = yaml.ParserNodeType.Scalar,
-              content = "item 3",
+          type = yaml.ParserNodeType.MappingEntry,
+          indent = 0,
+          key = {
+            type = yaml.ParserNodeType.Scalar,
+            indent = 0,
+            content = "saying",
+          },
+          value = {
+            type = yaml.ParserNodeType.Sequence,
+            indent = 2,
+            content = {
+              {
+                type = yaml.ParserNodeType.Scalar,
+                content = "item 1",
+              },
+              {
+                type = yaml.ParserNodeType.Scalar,
+                content = "item 2",
+              },
+              {
+                type = yaml.ParserNodeType.Scalar,
+                content = "item 3",
+              },
             },
           },
         },
@@ -1232,37 +1262,46 @@ function M.test_flow_sequence_document(testrun)
 end
 
 function M.test_flow_mapping_document(testrun)
-  local source = "- {key 1: value 1, key 2: value 2}"
+  local source = "stuff: {key 1: value 1, key 2: value 2}"
   local expected = {
     type = yaml.ParserNodeType.Root,
     content = {
-      type = yaml.ParserNodeType.Sequence,
+      type = yaml.ParserNodeType.Mapping,
       indent = 0,
       content = {
         {
-          type = yaml.ParserNodeType.Mapping,
-          indent = 2,
-          content = {
-            {
-              type = yaml.ParserNodeType.MappingEntry,
-              key = {
-                type = yaml.ParserNodeType.Scalar,
-                content = "key 1",
+          type = yaml.ParserNodeType.MappingEntry,
+          indent = 0,
+          key = {
+            type = yaml.ParserNodeType.Scalar,
+            indent = 0,
+            content = "saying",
+          },
+          value = {
+            type = yaml.ParserNodeType.Mapping,
+            indent = 2,
+            content = {
+              {
+                type = yaml.ParserNodeType.MappingEntry,
+                key = {
+                  type = yaml.ParserNodeType.Scalar,
+                  content = "key 1",
+                },
+                value = {
+                  type = yaml.ParserNodeType.Scalar,
+                  content = "value 1",
+                },
               },
-              value = {
-                type = yaml.ParserNodeType.Scalar,
-                content = "value 1",
-              },
-            },
-            {
-              type = yaml.ParserNodeType.MappingEntry,
-              key = {
-                type = yaml.ParserNodeType.Scalar,
-                content = "key 2",
-              },
-              value = {
-                type = yaml.ParserNodeType.Scalar,
-                content = "value 2",
+              {
+                type = yaml.ParserNodeType.MappingEntry,
+                key = {
+                  type = yaml.ParserNodeType.Scalar,
+                  content = "key 2",
+                },
+                value = {
+                  type = yaml.ParserNodeType.Scalar,
+                  content = "value 2",
+                },
               },
             },
           },
