@@ -756,7 +756,9 @@ local ParserContext = enum {
   "HandleMappingContinuation",
   "HandleSequenceContinuation",
   "InFlowSequence",
-  "InFlowMapping"
+  "InFlowMapping",
+  "ExpectDoubleQuote",
+  "ExpectSingleQuote",
 }
 
 if DEBUG then
@@ -788,6 +790,7 @@ function Parser:new(source)
     restore_context = nil,
     current_anchor = nil,
     anchor_definitions = {},
+    current_scalar_token = nil,
   }
   setmetatable(obj, {__index = self})
   return obj
@@ -870,7 +873,7 @@ end
 
 local function is_scalar_token(token)
   local ttype = dassert(token.type)
-  return ttype == TokenType.PlainScalar, TokenType.UnescapedScalar, TokenType.EscapedScalar
+  return ttype == TokenType.PlainScalar or ttype == TokenType.UnescapedScalar or ttype == TokenType.EscapedScalar
 end
 
 -- TODO test TokenType coverage
@@ -892,9 +895,11 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.Finished)
 
     elseif ttype == TokenType.SingleQuote then
+      self.restore_context = self.context
       return self:set_context(ParserContext.ExpectUnescapedScalar)
 
     elseif ttype == TokenType.DoubleQuote then
+      self.restore_context = self.context
       return self:set_context(ParserContext.ExpectEscapedScalar)
 
     elseif ttype == TokenType.Folded then
@@ -1035,9 +1040,11 @@ function Parser:parse_token(token)
       return
 
     elseif ttype == TokenType.SingleQuote then
+      self.restore_context = self.context
       return self:set_context(ParserContext.ExpectUnescapedScalar)
 
     elseif ttype == TokenType.DoubleQuote then
+      self.restore_context = self.context
       return self:set_context(ParserContext.ExpectEscapedScalar)
 
     elseif ttype == TokenType.Folded then
@@ -1145,10 +1152,30 @@ function Parser:parse_token(token)
     return self:set_context(restore_context)
 
   elseif self.context == ParserContext.ExpectEscapedScalar then
-    error "Not implemented"
+    dassert(ttype == TokenType.EscapedScalar)
+    self.current_scalar_token = token
+    return self:set_context(ParserContext.ExpectDoubleQuote)
+
+  elseif self.context == ParserContext.ExpectDoubleQuote then
+    assert(ttype == TokenType.DoubleQuote)
+    self.token_stream:push(self.current_scalar_token)
+    self.current_scalar_token = nil
+    local restore_context = self.restore_context
+    self.restore_context = nil
+    return self:set_context(restore_context)
 
   elseif self.context == ParserContext.ExpectUnescapedScalar then
-    error "Not implemented"
+    assert(ttype == TokenType.UnescapedScalar)
+    self.current_scalar_token = token
+    return self:set_context(ParserContext.ExpectSingleQuote)
+
+  elseif self.context == ParserContext.ExpectSingleQuote then
+    assert(ttype == TokenType.SingleQuote)
+    self.token_stream:push(self.current_scalar_token)
+    self.current_scalar_token = nil
+    local restore_context = self.restore_context
+    self.restore_context = nil
+    return self:set_context(restore_context)
 
   elseif self.context == ParserContext.InFlowSequence then
     error "Not implemented"
