@@ -1155,7 +1155,14 @@ end
 
 function M.test_bad_anchor_document(testrun)
   local source = "- *unknown"
-  return common.dummy_test(testrun)
+  local status, err = pcall(generate_document, source)
+  if not status and err:find("Undefined anchor: unknown") then
+    return report_pass(testrun)
+  elseif not status then
+    return report_fail(testrun, "Error message has been changed")
+  else
+    return report_fail(testrun, "Parser did not yield an error")
+  end
 end
 
 function M.test_escaped_scalar_document(testrun)
