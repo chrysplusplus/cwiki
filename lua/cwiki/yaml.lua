@@ -147,6 +147,7 @@ local TokenType = enum{
   "FoldIndent",
   "FoldLine",
   "FoldNewline",
+  "FoldEnd",
 }
 
 local TokeniserState = enum{
@@ -168,7 +169,8 @@ local TokeniserState = enum{
   "EmitFlowDoubleQuote",
   "FindFoldLineStart",
   "FindFoldLineEnd",
-  "EmitFoldIndent",
+  "FindFoldIndent",
+  "EmitFoldIndent", -- maybe unused
   "EmitFoldDocumentEnd",
 }
 
@@ -182,6 +184,7 @@ function Tokeniser:new(s)
     index = 1,
     line = { nr = 1, index = 0 },
     acc = { text = "", nr = 1, col = 1 },
+    fold_indent = 0,
   }
   setmetatable(ret, {__index = self})
   return ret
@@ -285,7 +288,7 @@ end
 
 -- Set the tokeniser to a folded context
 function Tokeniser:use_folded_context()
-  self.state = TokeniserState.EmitFoldIndent
+  self.state = TokeniserState.FindFoldIndent
 end
 
 -- Advance the tokeniser state machine to emit the next token in the source, or
@@ -640,7 +643,19 @@ function Tokeniser:next()
     self.index = new_index
     return token
 
+  elseif self.state == TokeniserState.FindFoldIndent then
+    local new_index = consume_indent(self.source, self.index)
+    if peek(self.source, new_index) == INDICATORS.EOL then
+      self.index = new_index + 1
+      return self:emit_token(TokenType.FoldNewline)
+    end
+    self.fold_indent = new_index - self.index
+    self.index = new_index
+    self:transition_state(TokeniserState.FindFoldLineStart)
+    return self:emit_token(TokenType.FoldIndent, self:position_table{ indent = indent })
+
   elseif self.state == TokeniserState.EmitFoldIndent then
+    error "Not implemented"
     local new_index = consume_indent(self.source, self.index)
     local indent = new_index - self.index
     local token = self:emit_token(TokenType.FoldIndent, self:position_table{ indent = indent })
@@ -649,6 +664,7 @@ function Tokeniser:next()
     return token
 
   elseif self.state == TokeniserState.FindFoldLineStart then
+    error "Not implemented"
     local ch = peek(self.source, self.index)
     if ch == INDICATORS.EOF then
       self:transition_state(TokeniserState.EmitFoldDocumentEnd)
@@ -1368,12 +1384,23 @@ function Parser:parse_token(token)
     end
 
   elseif self.context == ParserContext.InFoldedScalar then
+    error "Not implemented"
     if ttype == TokenType.FoldLine then
-      if self.current_indent == self.folded_indent then
+      local offset = self.current_indent - self.folded_indent
+      if offset > 0 then
+        table.insert(self.current_scalar_token.lines, string.rep(" ", offset) .. token.text)
+        return
+      elseif offset == 0 then
         table.insert(self.current_scalar_token.lines, token.text)
         return
       else
-        error "Not implemented"
+        self.token_stream:push(token)
+        self.token_stream:push(fold_lines_in_token(self.current_scalar_token))
+        self.current_indent = self.current_scalar_token.indent
+        self.current_scalar_token = nil
+        local restore_context = dassert(self.restore_context)
+        self.restore_context = nil
+        return self:set_context(restore_context)
       end
 
     elseif ttype == TokenType.FoldIndent then
@@ -1381,7 +1408,8 @@ function Parser:parse_token(token)
       return
 
     elseif ttype == TokenType.FoldNewline then
-      error "Not implemented"
+      table.insert(self.current_scalar_token.lines, "")
+      return
 
     elseif ttype == TokenType.DocumentEnd then
       self.token_stream:push(token)

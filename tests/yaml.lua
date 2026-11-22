@@ -536,30 +536,36 @@ function M.test_flow_anchor_name_tokens(testrun)
 end
 
 function M.test_folded_scalar_tokens(testrun)
+  local source = [[
+  line one.
+  still line one.
+
+  line two.
+    still line two, despite indent
+
+    line three, indented
+    line four, indented
+
+next scalar]]
   local expected = {
     { type = TokenType.FoldIndent,  indent = 2,                              line = 1 },
     { type = TokenType.FoldLine,    text = "line one.",                      line = 1,  col = 3 },
     { type = TokenType.FoldIndent,  indent = 2,                              line = 2 },
     { type = TokenType.FoldLine,    text = "still line one.",                line = 2,  col = 3 },
-    { type = TokenType.FoldIndent,  indent = 0,                              line = 3 },
     { type = TokenType.FoldNewline },
     { type = TokenType.FoldIndent,  indent = 2,                              line = 4 },
     { type = TokenType.FoldLine,    text = "line two.",                      line = 4,  col = 3 },
     { type = TokenType.FoldIndent,  indent = 4,                              line = 5 },
     { type = TokenType.FoldLine,    text = "still line two, despite indent", line = 5,  col = 5 },
-    { type = TokenType.FoldIndent,  indent = 0,                              line = 6 },
     { type = TokenType.FoldNewline },
     { type = TokenType.FoldIndent,  indent = 4,                              line = 7 },
     { type = TokenType.FoldLine,    text = "line three, indented",           line = 7,  col = 5 },
     { type = TokenType.FoldIndent,  indent = 4,                              line = 8 },
     { type = TokenType.FoldLine,    text = "line four, indented",            line = 8,  col = 5 },
-    { type = TokenType.FoldIndent,  indent = 0,                              line = 9 },
     { type = TokenType.FoldNewline },
-    { type = TokenType.FoldIndent,  indent = 0,                              line = 10 },
-    { type = TokenType.FoldLine,    text = "next scalar",                    line = 10, col = 1 },
-    { type = TokenType.DocumentEnd },
+    { type = TokenType.FoldEnd },
   }
-  local tokens = generate_folded_tokens("  line one.\n  still line one.\n\n  line two.\n    still line two, despite indent\n\n    line three, indented\n    line four, indented\n\nnext scalar", #expected)
+  local tokens = generate_folded_tokens(source, #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
