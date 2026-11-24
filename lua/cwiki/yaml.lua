@@ -831,7 +831,6 @@ function Parser:new(source)
     anchor_definitions = {},
     current_scalar_token = nil,
     folded_indent = 0,
-    flow_level = 0,
   }
   setmetatable(obj, {__index = self})
   return obj
@@ -993,12 +992,14 @@ function Parser:parse_token(token)
         type = ParserNodeType.Mapping,
         content = {},
         indent = self.current_indent,
+        _token = token,
       }
       self:push_node_to_stack{
         type = ParserNodeType.MappingEntry,
         key = key_node,
         value = {},
         indent = self.current_indent,
+        _token = token,
       }
       return self:set_context(ParserContext.ExpectMappingValue)
 
@@ -1007,12 +1008,10 @@ function Parser:parse_token(token)
         type = ParserNodeType.Sequence,
         content = {},
         indent = self.current_indent,
-        flow_level = self.flow_level,
+        _restore_context = self.context,
         _token = token,
       }
       self.tokeniser:use_flow_context()
-      self.restore_context = self.context
-      self.flow_level = self.flow_level + 1
       return self:set_context(ParserContext.InFlowSequence)
 
     elseif ttype == TokenType.MapBegin then
@@ -1020,12 +1019,10 @@ function Parser:parse_token(token)
         type = ParserNodeType.Mapping,
         content = {},
         indent = self.current_indent,
-        flow_level = self.flow_level,
+        _restore_context = self.context,
         _token = token,
       }
       self.tokeniser:use_flow_context()
-      self.restore_context = self.context
-      self.flow_level = self.flow_level + 1
       return self:set_context(ParserContext.InFlowMapping)
 
     elseif ttype == TokenType.Anchor then
@@ -1104,6 +1101,12 @@ function Parser:parse_token(token)
       dassert(node.anchor_name == token.text)
       return self:set_context(ParserContext.HandleSequenceContinuation)
 
+    elseif ttype == TokenType.SeqBegin then
+      error "Not implemented"
+
+    elseif ttype == TokenType.MapBegin then
+      error "Not implemented"
+
     else
       error(string.format("Token at line %d, column %d is disallowed", token.line or 0, token.col or 0))
     end
@@ -1123,12 +1126,14 @@ function Parser:parse_token(token)
         type = ParserNodeType.Mapping,
         content = {},
         indent = self.current_indent,
+        _token = token,
       }
       self:push_node_to_stack{
         type = ParserNodeType.MappingEntry,
         key = key_node,
         value = {},
         indent = self.current_indent,
+        _token = token,
       }
       return self:set_context(ParserContext.ExpectMappingValue)
 
@@ -1206,12 +1211,10 @@ function Parser:parse_token(token)
         type = ParserNodeType.Sequence,
         content = {},
         indent = self.current_indent,
-        flow_level = self.flow_level,
+        _restore_context = ParserContext.HandleMappingContinuation,
         _token = token,
       }
       self.tokeniser:use_flow_context()
-      self.restore_context = ParserContext.HandleMappingContinuation
-      self.flow_level = self.flow_level + 1
       return self:set_context(ParserContext.InFlowSequence)
 
     elseif ttype == TokenType.MapBegin then
@@ -1219,12 +1222,10 @@ function Parser:parse_token(token)
         type = ParserNodeType.Mapping,
         content = {},
         indent = self.current_indent,
-        flow_level = self.flow_level,
+        _restore_context = ParserContext.HandleMappingContinuation,
         _token = token,
       }
       self.tokeniser:use_flow_context()
-      self.restore_context = ParserContext.HandleMappingContinuation
-      self.flow_level = self.flow_level + 1
       return self:set_context(ParserContext.InFlowMapping)
 
     elseif ttype == TokenType.Anchor then
@@ -1246,6 +1247,7 @@ function Parser:parse_token(token)
         content = {},
         indent = self.current_indent,
         child_indent = 0,
+        _token = token,
       }
       return self:set_context(ParserContext.DetermineBlockSequenceIndent)
 
@@ -1277,12 +1279,14 @@ function Parser:parse_token(token)
         type = ParserNodeType.Mapping,
         indent = self.current_indent,
         content = {},
+        _token = token,
       }
       self:push_node_to_stack{
         type = ParserNodeType.MappingEntry,
         indent = self.current_indent,
         key = key_node,
         value = {},
+        _token = token,
       }
       return self:set_context(ParserContext.ExpectMappingValue)
 
@@ -1404,23 +1408,25 @@ function Parser:parse_token(token)
       error "Not implemented"
 
     elseif ttype == TokenType.SeqBegin then
-      error "Not implemented"
+      self:push_node_to_stack{
+        type = ParserNodeType.Sequence,
+        content = {},
+        _token = token,
+        _restore_context = ParserContext.PostFlowSequenceEntry,
+      }
+      return self:set_context(ParserContext.InFlowSequence)
 
     elseif ttype == TokenType.SeqEnd then
-      error "Not implemented"
+      local parent = dassert(self:get_last_node())
+      return self:set_context(dassert(parent._restore_context))
 
     elseif ttype == TokenType.MapBegin then
       self:push_node_to_stack{
         type = ParserNodeType.Mapping,
-        flow_level = self.flow_level + 1,
         content = {},
+        _token = token,
+        _restore_context = ParserContext.PostFlowSequenceEntry,
       }
-      self:push_node_to_stack{
-        type = ParserNodeType.MappingEntry,
-        key = {},
-        value = {},
-      }
-      self.flow_level = self.flow_level + 1
       return self:set_context(ParserContext.InFlowMapping)
 
     elseif ttype == TokenType.MapEnd then
@@ -1439,6 +1445,7 @@ function Parser:parse_token(token)
       self:push_node_to_stack{
         type = ParserNodeType.Scalar,
         content = dassert(token.text),
+        _token = token,
       }
       return self:set_context(ParserContext.PostFlowSequenceEntry)
 
@@ -1447,34 +1454,33 @@ function Parser:parse_token(token)
 
   elseif self.context == ParserContext.PostFlowSequenceEntry then
     if ttype == TokenType.SeqEnd then
-      local parent = dassert(self:get_last_node())
-      if not parent.flow_level or parent.flow_level > self.flow_level then
-        self:pop_and_adopt()
-        parent = dassert(self:get_last_node())
-      end
-
-      dassert(parent.flow_level and parent.flow_level == self.flow_level)
-      self.flow_level = self.flow_level - 1
-      error "Not implemented"
-
-
-
-
-      local restore_context = self.restore_context
-      self.restore_context = nil
-      return self:set_context(restore_context)
+      self.token_stream:push(token)
+      self.token_stream:push{ type = TokenType.Collect, }
+      return
 
     elseif ttype == TokenType.Collect then
       self:pop_and_adopt()
       return self:set_context(ParserContext.InFlowSequence)
 
-    else
-      error "Unexpected token"
+    else error "Unexpected token"
     end
 
   elseif self.context == ParserContext.InFlowMapping then
-    if ttype == TokenType.MapEnd then
+    if ttype == TokenType.DocumentEnd then
+      error "Expected end of sequence indicator"
+
+    elseif ttype == TokenType.SingleQuote then
       error "Not implemented"
+
+    elseif ttype == TokenType.DoubleQuote then
+      error "Not implemented"
+
+    elseif ttype == TokenType.SeqEnd then
+      error "Unexpected end of sequence indicator in mapping"
+
+    elseif ttype == TokenType.MapEnd then
+      local parent = dassert(self:get_last_node())
+      return self:set_context(dassert(parent._restore_context))
 
     elseif is_scalar_token(token) then
       self:push_node_to_stack{
@@ -1482,13 +1488,13 @@ function Parser:parse_token(token)
         key = {
           type = ParserNodeType.Scalar,
           content = dassert(token.text),
+          _token = token,
         },
         value = {},
       }
       return self:set_context(ParserContext.ExpectFlowMapValueIndicator)
 
-    else
-      error "Not allowed; only scalars can be used as keys"
+    else error "Unexpected token; note that only scalars can be used as mapping keys"
     end
 
   elseif self.context == ParserContext.ExpectFlowMapValueIndicator then
@@ -1499,14 +1505,20 @@ function Parser:parse_token(token)
     if ttype == TokenType.SeqBegin then
       self:push_node_to_stack{
         type = ParserNodeType.Sequence,
-        flow_level = self.flow_level,
         content = {},
+        _token = token,
+        _restore_context = ParserContext.PostFlowMapValue,
       }
-      self.flow_level = self.flow_level + 1
       return self:set_context(ParserContext.InFlowSequence)
 
     elseif ttype == TokenType.MapBegin then
-      error "Not implemented"
+      self:push_node_to_stack{
+        type = ParserNodeType.Mapping,
+        content = {},
+        _token = token,
+        _restore_context = ParserContext.PostFlowMapValue,
+      }
+      return self:set_context(ParserContext.InFlowMapping)
 
     elseif ttype == TokenType.Anchor then
       error "Not implemented"
@@ -1518,36 +1530,25 @@ function Parser:parse_token(token)
       self:push_node_to_stack{
         type = ParserNodeType.Scalar,
         content = dassert(token.text),
+        _token = token,
       }
       return self:set_context(ParserContext.PostFlowMapValue)
 
-    else
-      error "Unexpected token"
+    else error "Unexpected token"
     end
 
   elseif self.context == ParserContext.PostFlowMapValue then
     if ttype == TokenType.Collect then
-      self:pop_and_adopt() -- value
-      self:pop_and_adopt() -- entry
+      self:pop_and_adopt()
+      self:pop_and_adopt()
       return self:set_context(ParserContext.InFlowMapping)
 
     elseif ttype == TokenType.MapEnd then
-      self:pop_and_adopt() -- value
-      self:pop_and_adopt() -- entry
-      self:pop_and_adopt() -- mapping
+      self.token_stream:push(token)
+      self.token_stream:push{ type = TokenType.Collect, }
+      return
 
-      local parent = dassert(self:get_last_node())
-      if not parent.flow_level then
-        local restore_context = self.restore_context
-        self.restore_context = nil
-        return self:set_context(restore_context)
-
-      elseif parent.type == ParserNodeType.Mapping then
-        return self:set_context(ParserContext.PostFlowMapValue)
-      end
-
-    else
-      error "Unexpected token"
+    else error "Unexpected token"
     end
 
   -- folded token parsing behaves differently to the rest of the function so
