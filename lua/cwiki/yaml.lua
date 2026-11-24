@@ -72,6 +72,11 @@ local function peek(s, i)
   end
 end
 
+-- Return true if character is end-of-line or end-of-file
+local function is_eof_or_eol(ch)
+  return ch == INDICATORS.EOL or ch == INDICATORS.EOF
+end
+
 -- Advance index to the next non-empty line; return the rest of the current
 -- line and the new index
 local function consume_line(s, idx)
@@ -171,7 +176,7 @@ local TokeniserState = enum{
   "FindFoldLineEnd",
   "FindFoldIndent",
   "EmitFoldIndent", -- maybe unused
-  "EmitFoldDocumentEnd",
+  "EmitFoldEnd",
 }
 
 -- Tokeniser objects represent a generator that emits a sequence of lexical
@@ -652,22 +657,32 @@ function Tokeniser:next()
     self.fold_indent = new_index - self.index
     self.index = new_index
     self:transition_state(TokeniserState.FindFoldLineStart)
-    return self:emit_token(TokenType.FoldIndent, self:position_table{ indent = indent })
+    return self:emit_token(TokenType.FoldIndent, self:position_table{ indent = 0 })
 
   elseif self.state == TokeniserState.EmitFoldIndent then
-    error "Not implemented"
     local new_index = consume_indent(self.source, self.index)
     local indent = new_index - self.index
-    local token = self:emit_token(TokenType.FoldIndent, self:position_table{ indent = indent })
+    local relative_indent = indent - self.fold_indent
+    if relative_indent < 0 and not is_eof_or_eol(peek(self.source, new_index)) then
+      self.index = new_index
+      self:transition_state(TokeniserState.EmitFoldEnd)
+      return self:next()
+
+    elseif relative_indent < 0 then
+      self.index = new_index
+      self:transition_state(TokeniserState.FindFoldLineStart)
+      return self:next()
+    end
+
+    local token = self:emit_token(TokenType.FoldIndent, self:position_table{ indent = relative_indent })
     self.index = new_index
     self:transition_state(TokeniserState.FindFoldLineStart)
     return token
 
   elseif self.state == TokeniserState.FindFoldLineStart then
-    error "Not implemented"
     local ch = peek(self.source, self.index)
     if ch == INDICATORS.EOF then
-      self:transition_state(TokeniserState.EmitFoldDocumentEnd)
+      self:transition_state(TokeniserState.EmitFoldEnd)
       return self:emit_token(TokenType.FoldNewline)
 
     elseif ch == INDICATORS.EOL then
@@ -683,14 +698,14 @@ function Tokeniser:next()
       return self:next()
     end
 
-  elseif self.state == TokeniserState.EmitFoldDocumentEnd then
+  elseif self.state == TokeniserState.EmitFoldEnd then
     self:transition_state(TokeniserState.Finished)
-    return self:emit_token(TokenType.DocumentEnd)
+    return self:emit_token(TokenType.FoldEnd)
 
   elseif self.state == TokeniserState.FindFoldLineEnd then
     local ch = peek(self.source, self.index)
     if ch == INDICATORS.EOF then
-      self:transition_state(TokeniserState.EmitFoldDocumentEnd)
+      self:transition_state(TokeniserState.EmitFoldEnd)
       return self:emit_token(TokenType.FoldLine, self:use_accumulator())
 
     elseif ch == INDICATORS.EOL then
@@ -780,7 +795,9 @@ local ParserContext = enum {
   "PostFlowMapValue",
   "PostFlowSequenceEntry",
   "ExpectFoldIndent",
-  "InFoldedScalar",
+  "FoldedScalarParagraphStart",
+  "FoldedScalarIndentedParagraph",
+  "FoldedScalarParagraph",
 }
 
 if DEBUG then
@@ -917,6 +934,8 @@ local function fold_lines(lines)
     elseif was_last_indented then
       text = text .. "\n" .. l
       was_last_indented = false
+    elseif text:find("\n$") then
+      text = text .. l
     else
       text = text .. " " .. l
     end
@@ -1363,65 +1382,92 @@ function Parser:parse_token(token)
       error "Unexpected token"
     end
 
+  -- folded token parsing behaves differently to the rest of the function so
+  -- maybe could be its own thing
   elseif self.context == ParserContext.ExpectFoldIndent then
+    if ttype == TokenType.FoldNewline then return end
+    if ttype ~= TokenType.FoldIndent then error "Expected indented line after fold indicator" end
+    self.current_scalar_token = {
+      type = TokenType.PlainScalar,
+      indent = self.current_indent,
+      lines = {},
+    }
+    self.current_indent = dassert(token.indent)
+    return self:set_context(ParserContext.FoldedScalarParagraph)
+
+  elseif self.context == ParserContext.FoldedScalarParagraphStart then
     if ttype == TokenType.FoldIndent then
-      local folded_indent = dassert(token.indent)
-      if folded_indent == 0 then return end
-      self.folded_indent = folded_indent
-      self.current_scalar_token = {
-        type = TokenType.PlainScalar,
-        indent = self.current_indent,
-        lines = {},
-      }
-      self.current_indent = folded_indent
-      return self:set_context(ParserContext.InFoldedScalar)
-
-    elseif ttype == TokenType.FoldNewline then
-      return
-
-    else
-      error "Expected indented line after fold indicator"
-    end
-
-  elseif self.context == ParserContext.InFoldedScalar then
-    error "Not implemented"
-    if ttype == TokenType.FoldLine then
-      local offset = self.current_indent - self.folded_indent
-      if offset > 0 then
-        table.insert(self.current_scalar_token.lines, string.rep(" ", offset) .. token.text)
-        return
-      elseif offset == 0 then
-        table.insert(self.current_scalar_token.lines, token.text)
-        return
+      self.current_indent = dassert(token.indent)
+      if self.current_indent > 0 then
+        return self:set_context(ParserContext.FoldedScalarIndentedParagraph)
       else
-        self.token_stream:push(token)
-        self.token_stream:push(fold_lines_in_token(self.current_scalar_token))
-        self.current_indent = self.current_scalar_token.indent
-        self.current_scalar_token = nil
-        local restore_context = dassert(self.restore_context)
-        self.restore_context = nil
-        return self:set_context(restore_context)
+        return self:set_context(ParserContext.FoldedScalarParagraph)
       end
 
-    elseif ttype == TokenType.FoldIndent then
-      self.current_indent = dassert(token.indent)
-      return
+    elseif ttype == TokenType.FoldLine then
+      error "Expected indent token before line"
 
     elseif ttype == TokenType.FoldNewline then
-      table.insert(self.current_scalar_token.lines, "")
-      return
+      return table.insert(self.current_scalar_token.lines, "")
 
-    elseif ttype == TokenType.DocumentEnd then
-      self.token_stream:push(token)
-      self.token_stream:push(fold_lines_in_token(self.current_scalar_token))
+    elseif ttype == TokenType.FoldEnd then
+      self.tokeniser:use_block_context()
       self.current_indent = self.current_scalar_token.indent
-      self.current_scalar_token = nil
+      self.token_stream:push(fold_lines_in_token(self.current_scalar_token))
       local restore_context = dassert(self.restore_context)
       self.restore_context = nil
       return self:set_context(restore_context)
 
-    else
-      error "Unexpected token"
+    elseif DEBUG and ttype == TokenType.DocumentEnd then return
+    elseif DEBUG then error "Unreachable"
+    end
+
+  elseif self.context == ParserContext.FoldedScalarIndentedParagraph then
+    if ttype == TokenType.FoldIndent then
+      self.current_indent = dassert(token.indent)
+      return
+
+    elseif ttype == TokenType.FoldLine then
+      table.insert(self.current_scalar_token.lines, string.rep(" ", self.current_indent) .. dassert(token.text))
+      return
+
+    elseif ttype == TokenType.FoldNewline then
+      table.insert(self.current_scalar_token.lines, "")
+      return self:set_context(ParserContext.FoldedScalarParagraphStart)
+
+    elseif ttype == TokenType.FoldEnd then
+      self.tokeniser:use_block_context()
+      self.current_indent = self.current_scalar_token.indent
+      self.token_stream:push(fold_lines_in_token(self.current_scalar_token))
+      local restore_context = dassert(self.restore_context)
+      self.restore_context = nil
+      return self:set_context(restore_context)
+
+    elseif DEBUG and ttype == TokenType.DocumentEnd then return
+    elseif DEBUG then error "Unreachable"
+    end
+
+  elseif self.context == ParserContext.FoldedScalarParagraph then
+    if ttype == TokenType.FoldIndent then return
+
+    elseif ttype == TokenType.FoldLine then
+      table.insert(self.current_scalar_token.lines, dassert(token.text))
+      return
+
+    elseif ttype == TokenType.FoldNewline then
+      table.insert(self.current_scalar_token.lines, "")
+      return self:set_context(ParserContext.FoldedScalarParagraphStart)
+
+    elseif ttype == TokenType.FoldEnd then
+      self.tokeniser:use_block_context()
+      self.current_indent = self.current_scalar_token.indent
+      self.token_stream:push(fold_lines_in_token(self.current_scalar_token))
+      local restore_context = dassert(self.restore_context)
+      self.restore_context = nil
+      return self:set_context(restore_context)
+
+    elseif DEBUG and ttype == TokenType.DocumentEnd then return
+    elseif DEBUG then error "Unreachable"
     end
   end
 

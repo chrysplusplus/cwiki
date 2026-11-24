@@ -548,19 +548,19 @@ function M.test_folded_scalar_tokens(testrun)
 
 next scalar]]
   local expected = {
-    { type = TokenType.FoldIndent,  indent = 2,                              line = 1 },
+    { type = TokenType.FoldIndent,  indent = 0,                              line = 1 },
     { type = TokenType.FoldLine,    text = "line one.",                      line = 1,  col = 3 },
-    { type = TokenType.FoldIndent,  indent = 2,                              line = 2 },
+    { type = TokenType.FoldIndent,  indent = 0,                              line = 2 },
     { type = TokenType.FoldLine,    text = "still line one.",                line = 2,  col = 3 },
     { type = TokenType.FoldNewline },
-    { type = TokenType.FoldIndent,  indent = 2,                              line = 4 },
+    { type = TokenType.FoldIndent,  indent = 0,                              line = 4 },
     { type = TokenType.FoldLine,    text = "line two.",                      line = 4,  col = 3 },
-    { type = TokenType.FoldIndent,  indent = 4,                              line = 5 },
+    { type = TokenType.FoldIndent,  indent = 2,                              line = 5 },
     { type = TokenType.FoldLine,    text = "still line two, despite indent", line = 5,  col = 5 },
     { type = TokenType.FoldNewline },
-    { type = TokenType.FoldIndent,  indent = 4,                              line = 7 },
+    { type = TokenType.FoldIndent,  indent = 2,                              line = 7 },
     { type = TokenType.FoldLine,    text = "line three, indented",           line = 7,  col = 5 },
-    { type = TokenType.FoldIndent,  indent = 4,                              line = 8 },
+    { type = TokenType.FoldIndent,  indent = 2,                              line = 8 },
     { type = TokenType.FoldLine,    text = "line four, indented",            line = 8,  col = 5 },
     { type = TokenType.FoldNewline },
     { type = TokenType.FoldEnd },
@@ -571,13 +571,15 @@ next scalar]]
 end
 
 function M.test_folded_scalar_empty_newline_ending_tokens(testrun)
+  local source = [[
+  line one
+]]
   local expected = {
-    { type = TokenType.FoldIndent,  indent = 2,        line = 1 },
+    { type = TokenType.FoldIndent,  indent = 0,        line = 1 },
     { type = TokenType.FoldLine,    text = "line one", line = 1, col = 3 },
-    { type = TokenType.FoldIndent,  indent = 0,        line = 2 },
     { type = TokenType.FoldNewline },
   }
-  local tokens = generate_folded_tokens("  line one\n", #expected)
+  local tokens = generate_folded_tokens(source, #expected)
   local status, msg = check_tokens(expected, tokens)
   return test_result(testrun, status, msg)
 end
@@ -1085,7 +1087,7 @@ vice president:
   return test_result(testrun, status, msg)
 end
 
-function M.test_mapping_in_sequence(testrun)
+function M.test_mapping_in_sequence_document(testrun)
   local source = [[
 - name: Chrys
   voice: high
