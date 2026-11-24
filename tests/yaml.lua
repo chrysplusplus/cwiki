@@ -1482,9 +1482,55 @@ function M.test_nested_sequence_document(testrun)
 - mapping:
     - item 1
     - item 2
-  somthing else: nah
 - item 3]]
-  return common.dummy_test(testrun)
+  local expected = {
+    type = yaml.ParserNodeType.Root,
+    content = {
+      type = yaml.ParserNodeType.Sequence,
+      indent = 0,
+      content = {
+        {
+          type = yaml.ParserNodeType.Mapping,
+          indent = 2,
+          content = {
+            {
+              type = yaml.ParserNodeType.MappingEntry,
+              indent = 2,
+              key = {
+                type = yaml.ParserNodeType.Scalar,
+                indent = 2,
+                content = "mapping",
+              },
+              value = {
+                type = yaml.ParserNodeType.Sequence,
+                indent = 4,
+                content = {
+                  {
+                    type = yaml.ParserNodeType.Scalar,
+                    indent = 6,
+                    content = "item 1",
+                  },
+                  {
+                    type = yaml.ParserNodeType.Scalar,
+                    indent = 6,
+                    content = "item 2",
+                  },
+                },
+              },
+            },
+          },
+        },
+        {
+          type = yaml.ParserNodeType.Scalar,
+          indent = 2,
+          content = "item 3",
+        },
+      },
+    },
+  }
+  local document = generate_document(source)
+  local status, err = check_document(expected, document)
+  return test_result(testrun, status, err)
 end
 
 return M
