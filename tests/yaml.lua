@@ -1299,17 +1299,14 @@ function M.test_flow_sequence_document(testrun)
               {
                 type = yaml.ParserNodeType.Scalar,
                 content = "item 1",
-                flow_level = 1,
               },
               {
                 type = yaml.ParserNodeType.Scalar,
                 content = "item 2",
-                flow_level = 1,
               },
               {
                 type = yaml.ParserNodeType.Scalar,
                 content = "item 3",
-                flow_level = 1,
               },
             },
           },
@@ -1341,6 +1338,7 @@ function M.test_flow_mapping_document(testrun)
           value = {
             type = yaml.ParserNodeType.Mapping,
             indent = 0,
+            flow_level = 0,
             content = {
               {
                 type = yaml.ParserNodeType.MappingEntry,
@@ -1394,6 +1392,7 @@ function M.test_nested_flow_document(testrun)
           value = {
             type = yaml.ParserNodeType.Mapping,
             indent = 0,
+            flow_level = 0,
             content = {
               {
                 type = yaml.ParserNodeType.MappingEntry,
@@ -1403,6 +1402,7 @@ function M.test_nested_flow_document(testrun)
                 },
                 value = {
                   type = yaml.ParserNodeType.Sequence,
+                  flow_level = 1,
                   content = {
                     {
                       type = yaml.ParserNodeType.Scalar,
@@ -1410,6 +1410,7 @@ function M.test_nested_flow_document(testrun)
                     },
                     {
                       type = yaml.ParserNodeType.Mapping,
+                      flow_level = 2,
                       content = {
                         {
                           type = yaml.ParserNodeType.MappingEntry,
@@ -1426,6 +1427,7 @@ function M.test_nested_flow_document(testrun)
                     },
                     {
                       type = yaml.ParserNodeType.Sequence,
+                      flow_level = 2,
                       content = {
                         {
                           type = yaml.ParserNodeType.Scalar,
@@ -1435,10 +1437,12 @@ function M.test_nested_flow_document(testrun)
                     },
                     {
                       type = yaml.ParserNodeType.Mapping,
+                      flow_level = 2,
                       content = {},
                     },
                     {
                       type = yaml.ParserNodeType.Sequence,
+                      flow_level = 2,
                       content = {},
                     },
                   },
@@ -1452,6 +1456,7 @@ function M.test_nested_flow_document(testrun)
                 },
                 value = {
                   type = yaml.ParserNodeType.Mapping,
+                  flow_level = 1,
                   content = {
                     {
                       type = yaml.ParserNodeType.MappingEntry,
