@@ -1294,18 +1294,22 @@ function M.test_flow_sequence_document(testrun)
           value = {
             type = yaml.ParserNodeType.Sequence,
             indent = 0,
+            flow_level = 0,
             content = {
               {
                 type = yaml.ParserNodeType.Scalar,
                 content = "item 1",
+                flow_level = 1,
               },
               {
                 type = yaml.ParserNodeType.Scalar,
                 content = "item 2",
+                flow_level = 1,
               },
               {
                 type = yaml.ParserNodeType.Scalar,
                 content = "item 3",
+                flow_level = 1,
               },
             },
           },
@@ -1372,7 +1376,7 @@ function M.test_flow_mapping_document(testrun)
 end
 
 function M.test_nested_flow_document(testrun)
-  local source = "more stuff: {intro: [no, {one: 1}, [knows]], outro: {count: 2, phenome: try}}"
+  local source = "more stuff: {intro: [no, {one: 1}, [knows], {}, [], ], outro: {count: 2, phenome: try}}"
   local expected = {
     type = yaml.ParserNodeType.Root,
     content = {
@@ -1428,6 +1432,14 @@ function M.test_nested_flow_document(testrun)
                           content = "knows"
                         },
                       },
+                    },
+                    {
+                      type = yaml.ParserNodeType.Mapping,
+                      content = {},
+                    },
+                    {
+                      type = yaml.ParserNodeType.Sequence,
+                      content = {},
                     },
                   },
                 },

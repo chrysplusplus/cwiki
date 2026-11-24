@@ -1382,7 +1382,36 @@ function Parser:parse_token(token)
     return self:set_context(restore_context)
 
   elseif self.context == ParserContext.InFlowSequence then
-    if ttype == TokenType.SeqEnd then
+    if ttype == TokenType.DocumentEnd then
+      error "Expected end of sequence indicator"
+
+    elseif ttype == TokenType.SingleQuote then
+      error "Not implemented"
+
+    elseif ttype == TokenType.DoubleQuote then
+      error "Not implemented"
+
+    elseif ttype == TokenType.SeqBegin then
+      error "Not implemented"
+
+    elseif ttype == TokenType.SeqEnd then
+      error "Not implemented"
+
+    elseif ttype == TokenType.MapBegin then
+      local top = dassert(self:get_last_node())
+      print(enum_to_string(ParserNodeType, top.type))
+      error "Not implemented"
+
+    elseif ttype == TokenType.MapEnd then
+      error "Unexpected end of mapping indicator in sequence"
+
+    elseif ttype == TokenType.Collect then
+      error "Expected a value; got a separator"
+
+    elseif ttype == TokenType.Anchor then
+      error "Not implemented"
+
+    elseif ttype == TokenType.Alias then
       error "Not implemented"
 
     elseif is_scalar_token(token) then
@@ -1392,8 +1421,7 @@ function Parser:parse_token(token)
       }
       return self:set_context(ParserContext.PostFlowSequenceEntry)
 
-    else
-      error "Unexpected token"
+    else error "Unexpected token"
     end
 
   elseif self.context == ParserContext.PostFlowSequenceEntry then
@@ -1437,7 +1465,11 @@ function Parser:parse_token(token)
 
   elseif self.context == ParserContext.ExpectFlowMapValue then
     if ttype == TokenType.SeqBegin then
-      error "Not implemented"
+      self:push_node_to_stack{
+        type = ParserNodeType.Sequence,
+        content = {},
+      }
+      return self:set_context(ParserContext.InFlowSequence)
 
     elseif ttype == TokenType.MapBegin then
       error "Not implemented"
