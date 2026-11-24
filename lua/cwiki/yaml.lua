@@ -865,11 +865,11 @@ function Parser:get_last_node()
   return dassert(self.node_stack[#self.node_stack])
 end
 
--- Pop the nodes the stack and adopt them as child nodes until the indent level
--- of the top node in the stack matches the received indent
+-- Pop the nodes of the stack and adopt them as child nodes until the indent
+-- level of the top node in the stack matches the received indent
 function Parser:pop_stack_to_indent_level(indent)
   local prev_indent = dassert(self:get_last_node().indent)
-  while indent < prev_indent do
+  while indent ~= prev_indent do
     local child = table.remove(self.node_stack)
     if child.anchor_name then self.anchor_definitions[child.anchor_name] = child end
     adopt_node(self:get_last_node(), child)
@@ -893,7 +893,6 @@ function Parser:push_node_to_stack(node)
     self.current_anchor = nil
   end
   if #self.node_stack == 0 then self.node_stack[1] = node; return end
-  -- self:pop_stack_to_indent_level(dassert(node.indent)) -- maybe remove
   table.insert(self.node_stack, node)
 end
 
@@ -1111,13 +1110,27 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.Finished)
 
     elseif ttype == TokenType.MapValue then
-      error "Not implemented"
+      local key_node = dassert(table.remove(self.node_stack))
+      self:push_node_to_stack{
+        type = ParserNodeType.Mapping,
+        content = {},
+        indent = self.current_indent,
+      }
+      self:push_node_to_stack{
+        type = ParserNodeType.MappingEntry,
+        key = key_node,
+        value = {},
+        indent = self.current_indent,
+      }
+      return self:set_context(ParserContext.ExpectMappingValue)
 
     elseif ttype == TokenType.Seq then
-      self:pop_and_adopt()
       local parent = dassert(self:get_last_node())
-      dassert(parent.type == ParserNodeType.Sequence)
-      dassert(parent.indent)
+      if parent.type == ParserNodeType.Scalar then
+        self:pop_and_adopt()
+        parent = dassert(self:get_last_node())
+      end
+
       dassert(self.current_indent <= parent.indent, "Ambiguous indentation")
       if self.current_indent == parent.indent then
         return self:set_context(ParserContext.ExpectSequenceEntry)
@@ -1212,10 +1225,17 @@ function Parser:parse_token(token)
       error "Not implemented"
 
     elseif is_scalar_token(token) then
-      self:pop_and_adopt() -- value into entry
-      self:pop_and_adopt() -- entry into mapping
       local parent = dassert(self:get_last_node())
-      dassert(parent.type == ParserNodeType.Mapping)
+      if parent.type == ParserNodeType.Scalar then
+        self:pop_and_adopt()
+        parent = dassert(self:get_last_node())
+      end
+
+      if parent.type == ParserNodeType.MappingEntry then
+        self:pop_and_adopt()
+        parent = dassert(self:get_last_node())
+      end
+
       dassert(self.current_indent <= parent.indent, "Ambiguous indentation")
       if self.current_indent == parent.indent then
         self:push_node_to_stack{
@@ -1236,7 +1256,24 @@ function Parser:parse_token(token)
       end
 
     else
-      error "Unexpected token after mapping"
+      local parent = dassert(self:get_last_node())
+      if self.current_indent >= parent.indent then error "Unexpected token after mapping" end
+      self:pop_stack_to_indent_level(self.current_indent)
+      parent = dassert(self:get_last_node())
+      if parent.type == ParserNodeType.Sequence then
+        self.token_stream:push(token)
+        return self:set_context(ParserContext.HandleSequenceContinuation)
+
+      elseif parent.type == ParserNodeType.Mapping then
+        self.token_stream:push(token)
+        return self:set_context(ParserContext.HandleMappingContinuation)
+
+      elseif parent.type == ParserNodeType.Root then
+        self.token_stream:push(token)
+        return self:set_context(ParserContext.AtRoot)
+
+      else error "Invalid node stack"
+      end
     end
 
   elseif self.context == ParserContext.ExpectMappingValueIndicator then
