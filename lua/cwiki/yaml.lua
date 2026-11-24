@@ -1138,6 +1138,25 @@ function Parser:parse_token(token)
         self.token_stream:push(token)
         error "Not implemented"
       end
+
+    else
+      local parent = dassert(self:get_last_node())
+      if self.current_indent >= parent.indent then error "Unexpected token in sequnce" end
+      self:pop_stack_to_indent_level(self.current_indent)
+      parent = dassert(self:get_last_node())
+      self.token_stream:push(token)
+
+      if parent.type == ParserNodeType.Sequence then
+        return self:set_context(ParserContext.HandleSequenceContinuation)
+      elseif parent.type == ParserNodeType.Mapping then
+        return self:set_context(ParserContext.HandleMappingContinuation)
+      elseif parent.type == ParserNodeType.MappingEntry then
+        return self:set_context(ParserContext.HandleMappingContinuation)
+      elseif parent.type == ParserNodeType.Root then
+        return self:set_context(ParserContext.AtRoot)
+      else
+        error "Invalid node stack"
+      end
     end
 
   elseif self.context == ParserContext.ExpectMappingValue then
@@ -1197,7 +1216,13 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.HandleMappingContinuation)
 
     elseif ttype == TokenType.Seq then
-      error "Not implemented"
+      self:push_node_to_stack{
+        type = ParserNodeType.Sequence,
+        content = {},
+        indent = self.current_indent,
+        child_indent = 0,
+      }
+      return self:set_context(ParserContext.DetermineBlockSequenceIndent)
 
     elseif is_scalar_token(token) then
       self:push_node_to_stack{
@@ -1222,7 +1247,19 @@ function Parser:parse_token(token)
       return self:set_context(ParserContext.Finished)
 
     elseif ttype == TokenType.MapValue then
-      error "Not implemented"
+      local key_node = dassert(table.remove(self.node_stack))
+      self:push_node_to_stack{
+        type = ParserNodeType.Mapping,
+        indent = self.current_indent,
+        content = {},
+      }
+      self:push_node_to_stack{
+        type = ParserNodeType.MappingEntry,
+        indent = self.current_indent,
+        key = key_node,
+        value = {},
+      }
+      return self:set_context(ParserContext.ExpectMappingValue)
 
     elseif is_scalar_token(token) then
       local parent = dassert(self:get_last_node())
@@ -1250,9 +1287,19 @@ function Parser:parse_token(token)
           indent = self.current_indent,
         }
         return self:set_context(ParserContext.ExpectMappingValueIndicator)
+
       else
         self.token_stream:push(token)
-        error "Not implemented"
+        self:pop_and_adopt(self.current_indent)
+        parent = dassert(self:get_last_node())
+        if parent.type == ParserNodeType.Sequence then
+          return self:set_context(ParserContext.HandleSequenceContinuation)
+        elseif parent.type == ParserNodeType.MappingEntry then
+          return self:set_context(ParserContext.HandleMappingContinuation)
+        elseif parent.type == ParserNodeType.Root then
+          return self:set_context(ParserContext.AtRoot)
+        else error "Invalid node stack"
+        end
       end
 
     else
@@ -1260,18 +1307,14 @@ function Parser:parse_token(token)
       if self.current_indent >= parent.indent then error "Unexpected token after mapping" end
       self:pop_stack_to_indent_level(self.current_indent)
       parent = dassert(self:get_last_node())
+      self.token_stream:push(token)
+
       if parent.type == ParserNodeType.Sequence then
-        self.token_stream:push(token)
         return self:set_context(ParserContext.HandleSequenceContinuation)
-
       elseif parent.type == ParserNodeType.Mapping then
-        self.token_stream:push(token)
         return self:set_context(ParserContext.HandleMappingContinuation)
-
       elseif parent.type == ParserNodeType.Root then
-        self.token_stream:push(token)
         return self:set_context(ParserContext.AtRoot)
-
       else error "Invalid node stack"
       end
     end

@@ -979,7 +979,7 @@ length: 154 pages]]
   return test_result(testrun, status, msg)
 end
 
-function M.test_nested_mapping_document(testrun)
+function M.test_mapping_in_mapping_document(testrun)
   local source = [[
 president:
   name: Big Wallaman
@@ -1475,6 +1475,16 @@ function M.test_nested_flow_document(testrun)
   local document = generate_document(source)
   local status, err = check_document(expected, document)
   return test_result(testrun, status, err)
+end
+
+function M.test_nested_sequence_document(testrun)
+  local source = [[
+- mapping:
+    - item 1
+    - item 2
+  somthing else: nah
+- item 3]]
+  return common.dummy_test(testrun)
 end
 
 return M
