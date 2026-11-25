@@ -765,7 +765,7 @@ local function tokeniser_stream_adaptor(tokeniser)
   return stream.StackStream:new(upstream)
 end
 
-local ParserNodeType = enum {
+local DocumentNode = enum {
   "Root",
   "Scalar",
   "Sequence",
@@ -810,7 +810,7 @@ if DEBUG then
   }
 
   -- debug accessor for enums
-  setmetatable(ParserNodeType, _debug_restrict_accessor_tbl)
+  setmetatable(DocumentNode, _debug_restrict_accessor_tbl)
   setmetatable(ParserContext, _debug_restrict_accessor_tbl)
 end
 
@@ -842,18 +842,18 @@ end
 
 -- Nest a child node within a parent and return the result
 local function adopt_node(parent, child)
-  if parent.type == ParserNodeType.Sequence then
+  if parent.type == DocumentNode.Sequence then
     table.insert(parent.content, child)
-  elseif parent.type == ParserNodeType.Mapping then
-    dassert(child.type == ParserNodeType.MappingEntry)
+  elseif parent.type == DocumentNode.Mapping then
+    dassert(child.type == DocumentNode.MappingEntry)
     table.insert(parent.content, child)
-  elseif parent.type == ParserNodeType.Root then
+  elseif parent.type == DocumentNode.Root then
     parent.content = child
-  elseif parent.type == ParserNodeType.MappingEntry then
+  elseif parent.type == DocumentNode.MappingEntry then
     parent.value = child
   else
     if TRACE then
-      print(string.format("parent ParserNodeType.%s, child ParserNodeType.%s", enum_to_string(ParserNodeType, parent.type), enum_to_string(ParserNodeType, child.type)))
+      print(string.format("parent DocumentNode.%s, child DocumentNode.%s", enum_to_string(DocumentNode, parent.type), enum_to_string(DocumentNode, child.type)))
     end
     error "Invalid token type for parent node"
   end
@@ -905,7 +905,7 @@ function Parser:pop_all_nodes()
     adopt_node(self:get_last_node(), child)
   end
   self.document_tree = {
-    type = ParserNodeType.Root,
+    type = DocumentNode.Root,
     content = table.remove(self.node_stack) or {}
   }
 end
@@ -989,13 +989,13 @@ function Parser:parse_token(token)
     elseif ttype == TokenType.MapValue then
       local key_node = dassert(table.remove(self.node_stack))
       self:push_node_to_stack{
-        type = ParserNodeType.Mapping,
+        type = DocumentNode.Mapping,
         content = {},
         indent = self.current_indent,
         _token = token,
       }
       self:push_node_to_stack{
-        type = ParserNodeType.MappingEntry,
+        type = DocumentNode.MappingEntry,
         key = key_node,
         value = {},
         indent = self.current_indent,
@@ -1005,7 +1005,7 @@ function Parser:parse_token(token)
 
     elseif ttype == TokenType.SeqBegin then
       self:push_node_to_stack{
-        type = ParserNodeType.Sequence,
+        type = DocumentNode.Sequence,
         content = {},
         indent = self.current_indent,
         _restore_context = self.context,
@@ -1016,7 +1016,7 @@ function Parser:parse_token(token)
 
     elseif ttype == TokenType.MapBegin then
       self:push_node_to_stack{
-        type = ParserNodeType.Mapping,
+        type = DocumentNode.Mapping,
         content = {},
         indent = self.current_indent,
         _restore_context = self.context,
@@ -1041,7 +1041,7 @@ function Parser:parse_token(token)
     elseif ttype == TokenType.Seq then
       dassert(#self.node_stack == 0, "Unexpected token")
       self:push_node_to_stack{
-        type = ParserNodeType.Sequence,
+        type = DocumentNode.Sequence,
         content = {},
         indent = self.current_indent,
         child_indent = 0,
@@ -1052,7 +1052,7 @@ function Parser:parse_token(token)
     elseif is_scalar_token(token) then
       dassert(#self.node_stack == 0, "Unexpected token")
       self:push_node_to_stack{
-        type = ParserNodeType.Scalar,
+        type = DocumentNode.Scalar,
         content = dassert(token.text),
         indent = self.current_indent,
         _token = token,
@@ -1068,7 +1068,7 @@ function Parser:parse_token(token)
 
     dassert(#self.node_stack >= 1)
     local parent = self:get_last_node()
-    dassert(parent.type == ParserNodeType.Sequence)
+    dassert(parent.type == DocumentNode.Sequence)
     dassert(self.current_indent >= parent.indent, "Ambiguous indentation")
     self.current_indent = (self.current_indent == parent.indent) and (dassert(token.col) - 1) or self.current_indent
     parent.child_indent = self.current_indent
@@ -1081,7 +1081,7 @@ function Parser:parse_token(token)
       self.current_indent = (self.current_indent == parent.indent) and (dassert(token.col) - 1) or self.current_indent
       dassert(self.current_indent == parent.child_indent, "Ambiguous indentation")
       self:push_node_to_stack{
-        type = ParserNodeType.Scalar,
+        type = DocumentNode.Scalar,
         content = dassert(token.text),
         indent = self.current_indent,
         _token = token,
@@ -1123,13 +1123,13 @@ function Parser:parse_token(token)
     elseif ttype == TokenType.MapValue then
       local key_node = dassert(table.remove(self.node_stack))
       self:push_node_to_stack{
-        type = ParserNodeType.Mapping,
+        type = DocumentNode.Mapping,
         content = {},
         indent = self.current_indent,
         _token = token,
       }
       self:push_node_to_stack{
-        type = ParserNodeType.MappingEntry,
+        type = DocumentNode.MappingEntry,
         key = key_node,
         value = {},
         indent = self.current_indent,
@@ -1139,7 +1139,7 @@ function Parser:parse_token(token)
 
     elseif ttype == TokenType.Seq then
       local parent = dassert(self:get_last_node())
-      if parent.type == ParserNodeType.Scalar then
+      if parent.type == DocumentNode.Scalar then
         self:pop_and_adopt()
         parent = dassert(self:get_last_node())
       end
@@ -1152,13 +1152,13 @@ function Parser:parse_token(token)
         self:pop_stack_to_indent_level(self.current_indent)
         parent = dassert(self:get_last_node())
 
-        if parent.type == ParserNodeType.Sequence then
+        if parent.type == DocumentNode.Sequence then
           return self:set_context(ParserContext.HandleSequenceContinuation)
-        elseif parent.type == ParserNodeType.Mapping then
+        elseif parent.type == DocumentNode.Mapping then
           return self:set_context(ParserContext.HandleMappingContinuation)
-        elseif parent.type == ParserNodeType.MappingEntry then
+        elseif parent.type == DocumentNode.MappingEntry then
           return self:set_context(ParserContext.HandleMappingContinuation)
-        elseif parent.type == ParserNodeType.Root then
+        elseif parent.type == DocumentNode.Root then
           return self:set_context(ParserContext.AtRoot)
         else
           error "Invalid node stack"
@@ -1172,13 +1172,13 @@ function Parser:parse_token(token)
       parent = dassert(self:get_last_node())
       self.token_stream:push(token)
 
-      if parent.type == ParserNodeType.Sequence then
+      if parent.type == DocumentNode.Sequence then
         return self:set_context(ParserContext.HandleSequenceContinuation)
-      elseif parent.type == ParserNodeType.Mapping then
+      elseif parent.type == DocumentNode.Mapping then
         return self:set_context(ParserContext.HandleMappingContinuation)
-      elseif parent.type == ParserNodeType.MappingEntry then
+      elseif parent.type == DocumentNode.MappingEntry then
         return self:set_context(ParserContext.HandleMappingContinuation)
-      elseif parent.type == ParserNodeType.Root then
+      elseif parent.type == DocumentNode.Root then
         return self:set_context(ParserContext.AtRoot)
       else
         error "Invalid node stack"
@@ -1208,7 +1208,7 @@ function Parser:parse_token(token)
 
     elseif ttype == TokenType.SeqBegin then
       self:push_node_to_stack{
-        type = ParserNodeType.Sequence,
+        type = DocumentNode.Sequence,
         content = {},
         indent = self.current_indent,
         _restore_context = ParserContext.HandleMappingContinuation,
@@ -1219,7 +1219,7 @@ function Parser:parse_token(token)
 
     elseif ttype == TokenType.MapBegin then
       self:push_node_to_stack{
-        type = ParserNodeType.Mapping,
+        type = DocumentNode.Mapping,
         content = {},
         indent = self.current_indent,
         _restore_context = ParserContext.HandleMappingContinuation,
@@ -1243,7 +1243,7 @@ function Parser:parse_token(token)
 
     elseif ttype == TokenType.Seq then
       self:push_node_to_stack{
-        type = ParserNodeType.Sequence,
+        type = DocumentNode.Sequence,
         content = {},
         indent = self.current_indent,
         child_indent = 0,
@@ -1253,7 +1253,7 @@ function Parser:parse_token(token)
 
     elseif is_scalar_token(token) then
       self:push_node_to_stack{
-        type = ParserNodeType.Scalar,
+        type = DocumentNode.Scalar,
         content = dassert(token.text),
         indent = self.current_indent,
         _token = token,
@@ -1276,13 +1276,13 @@ function Parser:parse_token(token)
     elseif ttype == TokenType.MapValue then
       local key_node = dassert(table.remove(self.node_stack))
       self:push_node_to_stack{
-        type = ParserNodeType.Mapping,
+        type = DocumentNode.Mapping,
         indent = self.current_indent,
         content = {},
         _token = token,
       }
       self:push_node_to_stack{
-        type = ParserNodeType.MappingEntry,
+        type = DocumentNode.MappingEntry,
         indent = self.current_indent,
         key = key_node,
         value = {},
@@ -1292,12 +1292,12 @@ function Parser:parse_token(token)
 
     elseif is_scalar_token(token) then
       local parent = dassert(self:get_last_node())
-      if parent.type == ParserNodeType.Scalar then
+      if parent.type == DocumentNode.Scalar then
         self:pop_and_adopt()
         parent = dassert(self:get_last_node())
       end
 
-      if parent.type == ParserNodeType.MappingEntry then
+      if parent.type == DocumentNode.MappingEntry then
         self:pop_and_adopt()
         parent = dassert(self:get_last_node())
       end
@@ -1305,9 +1305,9 @@ function Parser:parse_token(token)
       dassert(self.current_indent <= parent.indent, "Ambiguous indentation")
       if self.current_indent == parent.indent then
         self:push_node_to_stack{
-          type = ParserNodeType.MappingEntry,
+          type = DocumentNode.MappingEntry,
           key = {
-            type = ParserNodeType.Scalar,
+            type = DocumentNode.Scalar,
             content = dassert(token.text),
             indent = self.current_indent,
             _token = token,
@@ -1321,11 +1321,11 @@ function Parser:parse_token(token)
         self.token_stream:push(token)
         self:pop_and_adopt(self.current_indent)
         parent = dassert(self:get_last_node())
-        if parent.type == ParserNodeType.Sequence then
+        if parent.type == DocumentNode.Sequence then
           return self:set_context(ParserContext.HandleSequenceContinuation)
-        elseif parent.type == ParserNodeType.MappingEntry then
+        elseif parent.type == DocumentNode.MappingEntry then
           return self:set_context(ParserContext.HandleMappingContinuation)
-        elseif parent.type == ParserNodeType.Root then
+        elseif parent.type == DocumentNode.Root then
           return self:set_context(ParserContext.AtRoot)
         else error "Invalid node stack"
         end
@@ -1338,13 +1338,13 @@ function Parser:parse_token(token)
       parent = dassert(self:get_last_node())
       self.token_stream:push(token)
 
-      if parent.type == ParserNodeType.Sequence then
+      if parent.type == DocumentNode.Sequence then
         return self:set_context(ParserContext.HandleSequenceContinuation)
-      elseif parent.type == ParserNodeType.Mapping then
+      elseif parent.type == DocumentNode.Mapping then
         return self:set_context(ParserContext.HandleMappingContinuation)
-      elseif parent.type == ParserNodeType.MappingEntry then
+      elseif parent.type == DocumentNode.MappingEntry then
         return self:set_context(ParserContext.HandleMappingContinuation)
-      elseif parent.type == ParserNodeType.Root then
+      elseif parent.type == DocumentNode.Root then
         return self:set_context(ParserContext.AtRoot)
       else error "Invalid node stack"
       end
@@ -1409,7 +1409,7 @@ function Parser:parse_token(token)
 
     elseif ttype == TokenType.SeqBegin then
       self:push_node_to_stack{
-        type = ParserNodeType.Sequence,
+        type = DocumentNode.Sequence,
         content = {},
         _token = token,
         _restore_context = ParserContext.PostFlowSequenceEntry,
@@ -1422,7 +1422,7 @@ function Parser:parse_token(token)
 
     elseif ttype == TokenType.MapBegin then
       self:push_node_to_stack{
-        type = ParserNodeType.Mapping,
+        type = DocumentNode.Mapping,
         content = {},
         _token = token,
         _restore_context = ParserContext.PostFlowSequenceEntry,
@@ -1443,7 +1443,7 @@ function Parser:parse_token(token)
 
     elseif is_scalar_token(token) then
       self:push_node_to_stack{
-        type = ParserNodeType.Scalar,
+        type = DocumentNode.Scalar,
         content = dassert(token.text),
         _token = token,
       }
@@ -1484,9 +1484,9 @@ function Parser:parse_token(token)
 
     elseif is_scalar_token(token) then
       self:push_node_to_stack{
-        type = ParserNodeType.MappingEntry,
+        type = DocumentNode.MappingEntry,
         key = {
-          type = ParserNodeType.Scalar,
+          type = DocumentNode.Scalar,
           content = dassert(token.text),
           _token = token,
         },
@@ -1504,7 +1504,7 @@ function Parser:parse_token(token)
   elseif self.context == ParserContext.ExpectFlowMapValue then
     if ttype == TokenType.SeqBegin then
       self:push_node_to_stack{
-        type = ParserNodeType.Sequence,
+        type = DocumentNode.Sequence,
         content = {},
         _token = token,
         _restore_context = ParserContext.PostFlowMapValue,
@@ -1513,7 +1513,7 @@ function Parser:parse_token(token)
 
     elseif ttype == TokenType.MapBegin then
       self:push_node_to_stack{
-        type = ParserNodeType.Mapping,
+        type = DocumentNode.Mapping,
         content = {},
         _token = token,
         _restore_context = ParserContext.PostFlowMapValue,
@@ -1528,7 +1528,7 @@ function Parser:parse_token(token)
 
     elseif is_scalar_token(token) then
       self:push_node_to_stack{
-        type = ParserNodeType.Scalar,
+        type = DocumentNode.Scalar,
         content = dassert(token.text),
         _token = token,
       }
@@ -1646,7 +1646,7 @@ end
 -- Module Exports
 M.Tokeniser      = Tokeniser
 M.TokenType      = TokenType
-M.ParserNodeType = ParserNodeType
+M.DocumentNode   = DocumentNode
 M.Parser         = Parser
 
 M.tokeniser_stream_adaptor = tokeniser_stream_adaptor
