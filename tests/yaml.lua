@@ -883,7 +883,8 @@ list 3:
       },
     },
   }
-  local document = generate_document(source)
+  local document, err = generate_document_2(source)
+  if err then return report_fail(testrun, err) end
   local status, msg = check_document(expected, document)
   return test_result(testrun, status, msg)
 end
@@ -1094,7 +1095,8 @@ vice president:
       },
     },
   }
-  local document = generate_document(source)
+  local document, err = generate_document_2(source)
+  if err then return report_fail(testrun, err) end
   local status, msg = check_document(expected, document)
   return test_result(testrun, status, msg)
 end
@@ -1182,7 +1184,8 @@ function M.test_mapping_in_sequence_document(testrun)
       },
     },
   }
-  local document = generate_document(source)
+  local document, err = generate_document_2(source)
+  if err then return report_fail(testrun, err) end
   local status, msg = check_document(expected, document)
   return test_result(testrun, status, msg)
 end

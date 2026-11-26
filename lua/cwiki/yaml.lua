@@ -936,6 +936,7 @@ local function parse_block_sequence(token_stream, indent, dispatch_fn)
       return parser()
 
     elseif state == BlockSequenceParserState.PostEntry and token.type == TokenType.DocumentEnd then
+      token_stream:push(token)
       state = BlockSequenceParserState.Finished
       return sequence_node
 
@@ -948,11 +949,18 @@ local function parse_block_sequence(token_stream, indent, dispatch_fn)
 
     elseif state == BlockSequenceParserState.PostEntry and token.type == TokenType.Seq then
       token_stream:push(token)
+      token_stream:push{ type = BlockIndent, indent = indent }
       state = BlockSequenceParserState.Finished
       return sequence_node
 
     elseif state == BlockSequenceParserState.PostEntry and token.type == TokenType.MapValue then
       error "Not implemented"
+
+    elseif state == BlockSequenceParserState.PostEntry and indent < sequence_node.indent then
+      token_stream:push(token)
+      token_stream:push{ type = TokenType.BlockIndent, indent = indent }
+      state = BlockSequenceParserState.Finished
+      return sequence_node
 
     elseif state == BlockSequenceParserState.PostEntry then
       return token, "Unexpected"
@@ -1032,17 +1040,24 @@ local function parse_block_mapping(token_stream, initial_node, dispatch_fn)
       return token, "Unexpected symbol after mapping indicator"
 
     elseif state == BlockMappingParserState.ExpectMappingValue and token.type == TokenType.DocumentEnd then
+      token_stream:push(token)
       state = BlockMappingParserState.Finished
       return token, "Expected a value for mapping"
 
     elseif state == BlockMappingParserState.ExpectMappingValue then
-      error "Not implemented"
+      token_stream:push(token)
+      local token_or_node, err = dispatch_fn{ type = TokenType.BlockIndent, indent = indent }
+      if err then return token_or_node, err end
+      set_last_value(token_or_node)
+      state = BlockMappingParserState.PostValue
+      return parser()
 
     elseif state == BlockMappingParserState.PostValue and token.type == TokenType.BlockIndent then
       indent = token.indent
       return parser()
 
     elseif state == BlockMappingParserState.PostValue and token.type == TokenType.DocumentEnd then
+      token_stream:push(token)
       state = BlockMappingParserState.Finished
       return mapping_node
 
@@ -1063,59 +1078,6 @@ local function parse_block_mapping(token_stream, initial_node, dispatch_fn)
     elseif state == BlockMappingParserState.PostValue and is_scalar_token(token) and indent < mapping_node.indent then
       state = BlockMappingParserState.Finished
       return mapping_node
-    end
-  end
-
-  return parser()
-end
-
-local function parse_document(token_stream)
-  local token_stream = assert(token_stream)
-  local doc, root_type
-
-  local indent = 0
-
-  local parser, parse_token
-
-  parse_token = function (token)
-    if token.type == TokenType.BlockIndent then
-      indent = token.indent
-      return parser()
-
-    elseif token.type == TokenType.DocumentEnd then
-      return doc or {}
-
-    elseif token.type == TokenType.Seq and not root_type then
-      root_type = DocumentNode.Sequence
-      token_stream:push(token)
-      local token_or_doc, err = parse_block_sequence(token_stream, indent, parse_token)
-      if err then return token_or_doc, err end
-      doc = token_or_doc
-      return parser()
-
-    elseif token.type == TokenType.Seq then
-      return token, "Cannot have mixed sequences and mappings at the document root"
-
-    elseif is_scalar_token(token) and root_type ~= DocumentNode.Sequence then
-      root_type = DocumentNode.Scalar
-      doc = {
-        type = DocumentNode.Scalar,
-        content = token.text,
-        indent = indent,
-        _token = token,
-      }
-      return parser()
-
-    elseif is_scalar_token(token) then
-      return token, "Cannot have mixed sequences and mappings at the document root"
-
-    elseif token.type == TokenType.MapValue and root_type == DocumentNode.Scalar then
-      root_type = DocumentNode.Mapping
-      token_stream:push(token)
-      local token_or_doc, err = parse_block_mapping(token_stream, doc, parse_token)
-      if err then return token_or_doc, err end
-      doc = token_or_doc
-      return parser()
 
     else
       error "Not implemented"
@@ -1124,13 +1086,65 @@ local function parse_document(token_stream)
     if DEBUG then error "Unreachable" end
   end
 
-  parser = function ()
-    local token = token_stream:next()
-    if not token then
-      return doc or {}
+  return parser()
+end
+
+local function parse_document(token_stream)
+  local token_stream = assert(token_stream)
+
+  local indent = 0
+
+  local parser, parse_token
+
+  parse_token = function (token, accumulator)
+    if token.type == TokenType.BlockIndent then
+      indent = token.indent
+      return parser(accumulator)
+
+    elseif token.type == TokenType.DocumentEnd then
+      token_stream:push(token)
+      token_stream:push{ type = TokenType.BlockIndent, indent = indent }
+      return accumulator or {}
+
+    elseif token.type == TokenType.Seq and not accumulator then
+      token_stream:push(token)
+      local token_or_doc, err = parse_block_sequence(token_stream, indent, parse_token)
+      if err then return token_or_doc, err end
+      accumulator = token_or_doc
+      return parser(accumulator)
+
+    elseif is_scalar_token(token) and not accumulator then
+      accumulator = {
+        type = DocumentNode.Scalar,
+        content = token.text,
+        indent = indent,
+        _token = token,
+      }
+      return parser(accumulator)
+
+    elseif token.type == TokenType.MapValue and accumulator and accumulator.type == DocumentNode.Scalar then
+      token_stream:push(token)
+      local token_or_doc, err = parse_block_mapping(token_stream, accumulator, parse_token)
+      if err then return token_or_doc, err end
+      accumulator = token_or_doc
+      return parser(accumulator)
+
+    else
+      token_stream:push(token)
+      token_stream:push{ type = TokenType.BlockIndent, indent = indent }
+      return accumulator or {}
     end
 
-    return parse_token(token)
+    if DEBUG then error "Unreachable" end
+  end
+
+  parser = function (accumulator)
+    local token = token_stream:next()
+    if not token then
+      return accumulator or {}
+    end
+
+    return parse_token(token, accumulator)
   end
 
   local token_or_document_node, err = parser()
@@ -1142,8 +1156,6 @@ local function parse_document(token_stream)
       content = token_or_document_node,
     }
   end
-
-  return parser()
 end
 
 
