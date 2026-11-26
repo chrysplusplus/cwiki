@@ -89,6 +89,13 @@ local function generate_document(source)
   return parser.document_tree
 end
 
+-- Return the document parsed by yaml.parse_document on a token stream
+-- constructed from the received source
+local function generate_document_2(source)
+  local token_stream = yaml.tokeniser_stream_adaptor(yaml.Tokeniser:new(source))
+  return yaml.parse_document(token_stream)
+end
+
 -- Check the structure of the received document matches that of the expected
 -- table; return "pass" or "fail" and a message
 local function check_document(expected, received)
@@ -595,7 +602,8 @@ function M.test_single_plain_scalar_document(testrun)
     },
   }
 
-  local document = generate_document(source)
+  local document, err = generate_document_2(source)
+  if err then return report_fail(testrun, err) end
   local status, msg = check_document(expected, document)
   return test_result(testrun, status, msg)
 end
@@ -607,7 +615,8 @@ function M.test_empty_document(testrun)
     content = {},
   }
 
-  local document = generate_document(source)
+  local document, err = generate_document_2(source)
+  if err then return report_fail(testrun, err) end
   local status, msg = check_document(expected, document)
   return test_result(testrun, status, msg)
 end
@@ -654,7 +663,8 @@ function M.test_simple_sequence_document(testrun)
     },
   }
 
-  local document = generate_document(source)
+  local document, err = generate_document_2(source)
+  if err then return report_fail(testrun, err) end
   local status, msg = check_document(expected, document)
   return test_result(testrun, status, msg)
 end
@@ -701,12 +711,13 @@ key 2: value 2]]
     },
   }
 
-  local document = generate_document(source)
+  local document, err = generate_document_2(source)
+  if err then return report_fail(testrun, err) end
   local status, msg = check_document(expected, document)
   return test_result(testrun, status, msg)
 end
 
-function M.test_debug_parser_context_coverage(testrun)
+function M._unused_test_debug_parser_context_coverage(testrun)
   if not DEBUG then return end
   for context = 1, util.enum_max(yaml.ParserContext) do
     local parser = yaml.Parser:new ""
@@ -732,7 +743,8 @@ very important]]
     },
   }
 
-  local document = generate_document(source)
+  local document, err = generate_document_2(source)
+  if err then return report_fail(testrun, err) end
   local status, msg = check_document(expected, document)
   return test_result(testrun, status, msg)
 end

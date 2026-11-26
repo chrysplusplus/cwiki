@@ -777,166 +777,380 @@ local DocumentNode = enum {
   "Sequence",
   "Mapping",
   "MappingEntry",
+  "Anchor",
+  "Alias",
 }
 
-local function node_stack_push(stack, node, anchors)
-  if anchors.current then
-    node.anchor_name, anchors.current = anchors.current, nil
+-- Return a readable representation of a document tree
+local function print_document_tree(tree)
+  local visit_children, impl
+
+  visit_children = function (lines, t, depth)
+    local indent = string.rep(" ", depth)
+    for _, node in ipairs(t.content) do
+      table.insert(lines, indent .. "  {")
+      for _, line in ipairs(impl(node, depth + 4)) do
+        table.insert(lines, line)
+      end
+      table.insert(lines, indent .. "  }")
+    end
   end
-  table.insert(stack, node)
+
+  impl = function (t, depth)
+    if not t then return nil end
+    local indent = string.rep(" ", depth)
+    local lines = {}
+    if t.type == DocumentNode.Root then
+      table.insert(lines, "{")
+      table.insert(lines, "  type = Root")
+      table.insert(lines, "  content = {")
+      for _, line in ipairs(impl(t.content, 4)) do
+        table.insert(lines, line)
+      end
+      table.insert(lines, "  }")
+      table.insert(lines, "}")
+      return lines
+
+    elseif t.type == DocumentNode.Scalar then
+      table.insert(lines, indent .. "type = Scalar")
+      table.insert(lines, indent .. string.format("content = '%s'", t.content))
+      return lines
+
+    elseif t.type == DocumentNode.Sequence then
+      table.insert(lines, indent .. "type = Sequence")
+      table.insert(lines, indent .. "content = {")
+      for _, node in ipairs(t.content) do
+        table.insert(lines, indent .. "  {")
+        for _, line in ipairs(impl(node, depth + 4)) do
+          table.insert(lines, line)
+        end
+        table.insert(lines, indent .. "  }")
+      end
+      table.insert(lines, indent .. "}")
+      return lines
+
+    elseif t.type == DocumentNode.Mapping then
+      table.insert(lines, indent .. "type = Mapping")
+      table.insert(lines, indent .. "content = {")
+      for _, node in ipairs(t.content) do
+        table.insert(lines, indent .. "  {")
+        for _, line in ipairs(impl(node, depth + 4)) do
+          table.insert(lines, line)
+        end
+        table.insert(lines, indent .. "  }")
+      end
+      table.insert(lines, indent .. "}")
+      return lines
+
+    elseif t.type == DocumentNode.MappingEntry then
+      table.insert(lines, indent .. "type = MappingEntry")
+      table.insert(lines, indent .. "key = {")
+      for _, line in ipairs(impl(t.key, depth + 2)) do
+        table.insert(lines, line)
+      end
+      table.insert(lines, indent .. "}")
+      table.insert(lines, indent .. "value = {")
+      for _, line in ipairs(impl(t.value, depth + 2)) do
+        table.insert(lines, line)
+      end
+      table.insert(lines, indent .. "}")
+      return lines
+    end
+  end
+
+  return table.concat(impl(tree, 0), "\n")
 end
 
 local BlockSequenceParserState = enum {
   "Finished",
-  "Initialise",
   "FindIndent",
+  "FindChildIndent",
   "ExpectEntry",
   "PostEntry",
 }
 
--- Parsing logic for block style sequences
-local BlockSequenceParser = {}
-function BlockSequenceParser:new(token_stream, anchors)
-  local obj = {
-    state = BlockSequenceParserState.Initialise,
-    token_stream = token_stream,
-    anchors = anchors,
-    stack = {},
-    current_indent = 0,
+local function parse_block_sequence(token_stream, indent, dispatch_fn)
+  local state = BlockSequenceParserState.FindIndent
+  local token_stream = assert(token_stream)
+  local dispatch_fn = dispatch_fn or function (...) return nil end
+  local indent = indent or 0
+
+  local sequence_node = {
+    type = DocumentNode.Sequence,
+    content = {},
+    indent = -1,
+    child_indent = -1,
   }
-  return setmetatable(obj, {__index = self})
+
+  local parser
+  parser = function ()
+    if state == BlockSequenceParserState.Finished then return nil, "Parser finished" end
+
+    local token = token_stream:next()
+    if not token then
+      state = BlockSequenceParserState.Finished
+      return nil, "Nil token"
+    end
+
+    if state == BlockSequenceParserState.FindIndent and token.type == TokenType.BlockIndent then
+      indent = token.indent
+      return parser()
+
+    elseif state == BlockSequenceParserState.FindIndent and token.type == TokenType.Seq then
+      sequence_node.indent = indent
+      state = BlockSequenceParserState.FindChildIndent
+      return parser()
+
+    elseif state == BlockSequenceParserState.FindIndent then
+      return token, "Unsupported token; you may be using the wrong parser type"
+
+    elseif state == BlockSequenceParserState.FindChildIndent  and token.type == TokenType.BlockIndent then
+      indent = token.indent
+      return parser()
+
+    elseif state == BlockSequenceParserState.FindChildIndent then
+      if indent < sequence_node.indent then return token, "Sequence entries cannot be empty" end
+      if indent == sequence_node.indent then indent = token.col - 1 end
+      sequence_node.child_indent = indent
+      token_stream:push(token)
+      state = BlockSequenceParserState.ExpectEntry
+      return parser()
+
+    elseif state == BlockSequenceParserState.ExpectEntry and is_scalar_token(token) then
+      if indent == sequence_node.indent then indent = token.col - 1 end
+      if indent ~= sequence_node.child_indent then return token, "Ambiguous indentation" end
+      table.insert(sequence_node.content, {
+        type = DocumentNode.Scalar,
+        content = token.text,
+        indent = indent,
+        _token = token,
+      })
+      state = BlockSequenceParserState.PostEntry
+      return parser()
+
+    elseif state == BlockSequenceParserState then
+      error "Not implemented"
+
+    elseif state == BlockSequenceParserState.PostEntry and token.type == TokenType.BlockIndent then
+      indent = token.indent
+      return parser()
+
+    elseif state == BlockSequenceParserState.PostEntry and token.type == TokenType.DocumentEnd then
+      state = BlockSequenceParserState.Finished
+      return sequence_node
+
+    elseif state == BlockSequenceParserState.PostEntry and token.type == TokenType.Seq and indent > sequence_node.indent then
+      return token, "Bad indentation in sequence"
+
+    elseif state == BlockSequenceParserState.PostEntry and token.type == TokenType.Seq and indent == sequence_node.indent then
+      state = BlockSequenceParserState.ExpectEntry
+      return parser()
+
+    elseif state == BlockSequenceParserState.PostEntry and token.type == TokenType.Seq then
+      token_stream:push(token)
+      state = BlockSequenceParserState.Finished
+      return sequence_node
+
+    elseif state == BlockSequenceParserState.PostEntry and token.type == TokenType.MapValue then
+      error "Not implemented"
+
+    elseif state == BlockSequenceParserState.PostEntry then
+      return token, "Unexpected"
+    end
+
+    if DEBUG then error "Unreachable" end
+  end
+
+  return parser()
 end
 
--- Return a root sequence node with optional values
-function BlockSequenceParser:sequence_node(opts)
-  local opts = opts or {}
-  opts.type = DocumentNode.Sequence
-  opts.content = {}
-  opts.indent = self.current_indent
-  opts.child_indent = -1
-  return opts
-end
+local BlockMappingParserState = enum {
+  "Finished",
+  "ExpectMapValueToken",
+  "ExpectMappingValue",
+  "PostValue",
+}
 
--- Return a scalar node with optional values
-function BlockSequenceParser:scalar_node_from(token)
-  return {
-    type = DocumentNode.Scalar,
-    content = token.text,
-    indent = self.current_indent,
-    _token = token,
+local function parse_block_mapping(token_stream, initial_node, dispatch_fn)
+  local state = BlockMappingParserState.ExpectMapValueToken
+  local token_stream = assert(token_stream)
+  local dispatch_fn = dispatch_fn or function (...) return nil end
+
+  if initial_node.type ~= DocumentNode.Scalar then error "Initial mapping key must be a scalar" end
+
+  local mapping_node = {
+    type = DocumentNode.Mapping,
+    content = {
+      {
+        type = DocumentNode.MappingEntry,
+        key = initial_node,
+        value = {},
+        indent = initial_node.indent,
+      },
+    },
+    indent = initial_node.indent,
   }
-end
+  local indent = initial_node.indent
 
-function BlockSequenceParser:initialise(token)
-  if token.type == TokenType.BlockIndent then
-    self.current_indent = token.indent
-    return self:parse()
-
-  elseif token.type == TokenType.Seq then
-    node_stack_push(self.stack, self:sequence_node(), self.anchors)
-    self.state = BlockSequenceParserState.FindIndent
-    return self:parse()
-
-  else return token, "Unsupported token; you may be using the wrong parser type" end
-end
-
-local function calculate_sequence_offset(token, indent, seq_indent)
-  return (indent == seq_indent) and (token.col - 1) or indent
-end
-
-function BlockSequenceParser:find_indent(token)
-  if token.type == TokenType.BlockIndent then
-    self.current_indent = token.indent
-    return self:parse()
+  local set_last_value = function (val)
+    mapping_node.content[#mapping_node.content].value = val
   end
 
-  local parent = self.stack[1]
-  if self.current_indent < parent.indent then return token, "Sequence entries cannot be empty" end
-  self.current_indent = calculate_sequence_offset(token, self.current_indent, parent.indent)
-  parent.child_indent = self.current_indent
-  self.token_stream:push(token)
-  self.state = BlockSequenceParserState.ExpectEntry
-  return self:parse()
-end
+  local parser
+  parser = function ()
+    if state == BlockMappingParserState.Finished then return nil, "Parser finished" end
 
-function BlockSequenceParser:expect_entry(token)
-  if is_scalar_token(token) then
-    local parent = self.stack[1]
-    self.current_indent = calculate_sequence_offset(token, self.current_indent, parent.indent)
-    if self.current_indent ~= parent.child_indent then return token, "Ambiguous indentation" end
-    table.insert(parent.content, self:scalar_node_from(token))
-    self.state = BlockSequenceParserState.PostEntry
-    return self:parse()
+    local token = token_stream:next()
+    if not token then
+      state = BlockMappingParserState.Finished
+      return nil, "Nil token"
+    end
 
-  elseif token.type == TokenType.Anchor then
-    error "Not implemented"
-  elseif token.type == TokenType.Alias then
-    error "Not implemented"
-  elseif token.type == TokenType.SeqBegin then
-    error "Not implemented"
-  elseif token.type == TokenType.MapBegin then
-    error "Not implemented"
-  else return token, "Unexpected" end
-end
+    if state == BlockMappingParserState.ExpectMapValueToken and token.type == TokenType.MapValue then
+      state = BlockMappingParserState.ExpectMappingValue
+      return parser()
 
-function BlockSequenceParser:post_entry(token)
-  local parent = self.stack[1]
-  if token.type == TokenType.BlockIndent then
-    self.current_indent = token.indent
-    return self:parse()
+    elseif state == BlockMappingParserState.ExpectMapValueToken then
+      return token, string.format("Expected mapping indicator '%s'", INDICATORS.MAP_VALUE)
 
-  elseif token.type == TokenType.DocumentEnd then
-    self.state = BlockSequenceParser.Finished
-    return parent
+    elseif state == BlockMappingParserState.ExpectMappingValue and token.type == TokenType.BlockIndent then
+      indent = token.indent
+      return parser()
 
-  elseif token.type == TokenType.Seq and self.current_indent > parent.indent then
-    return token, "Bad indentation in sequence"
+    elseif state == BlockMappingParserState.ExpectMappingValue and is_scalar_token(token) then
+      set_last_value {
+        type = DocumentNode.Scalar,
+        content = token.text,
+        indent = indent,
+        _token = token,
+      }
+      state = BlockMappingParserState.PostValue
+      return parser()
 
-  elseif token.type == TokenType.Seq and self.current_indent == parent.indent then
-    self.state = BlockSequenceParserState.ExpectEntry
-    return self:parse()
+    elseif state == BlockMappingParserState.ExpectMappingValue and token.type == TokenType.MapValue then
+      state = BlockMappingParserState.Finished
+      return token, "Unexpected symbol after mapping indicator"
 
-  elseif token.type == TokenType.Seq and self.current_indent < parent.indent then
-    self.token_stream:push(token)
-    self.state = BlockSequenceParserState.Finished
-    return parent
+    elseif state == BlockMappingParserState.ExpectMappingValue and token.type == TokenType.DocumentEnd then
+      state = BlockMappingParserState.Finished
+      return token, "Expected a value for mapping"
 
-  elseif token.type == TokenType.MapValue then
-    error "Not implemented"
+    elseif state == BlockMappingParserState.ExpectMappingValue then
+      error "Not implemented"
 
-  else return token, "Unexpected" end
-end
+    elseif state == BlockMappingParserState.PostValue and token.type == TokenType.BlockIndent then
+      indent = token.indent
+      return parser()
 
--- Parse the node represnted by the tokens in the token stream and if the
--- stream can be parsed in its entirety, return a dispatch notice, or the
--- appropriate error
---
--- Return (node_or_dispath_or_error_token, err_msg) or nil
-function BlockSequenceParser:parse()
-  if self.state == BlockSequenceParserState.Finished then return {} end
+    elseif state == BlockMappingParserState.PostValue and token.type == TokenType.DocumentEnd then
+      state = BlockMappingParserState.Finished
+      return mapping_node
 
-  local token = self.token_stream:next()
-  if not token then
-    self.state = BlockSequenceParserState.Finished
-    return {}
+    elseif state == BlockMappingParserState.PostValue and is_scalar_token(token) and indent >= mapping_node.indent then
+      table.insert(mapping_node.content, {
+        type = DocumentNode.MappingEntry,
+        key = {
+          type = DocumentNode.Scalar,
+          content = token.text,
+          indent = indent,
+        },
+        value = {},
+        indent = indent,
+      })
+      state = BlockMappingParserState.ExpectMapValueToken
+      return parser()
+
+    elseif state == BlockMappingParserState.PostValue and is_scalar_token(token) and indent < mapping_node.indent then
+      state = BlockMappingParserState.Finished
+      return mapping_node
+    end
   end
 
-  print(enum_to_string(BlockSequenceParserState, self.state))
-  print(print_token(token))
-
-  if self.state == BlockSequenceParserState.Initialise then
-    return self:initialise(token)
-
-  elseif self.state == BlockSequenceParserState.FindIndent then
-    return self:find_indent(token)
-
-  elseif self.state == BlockSequenceParserState.ExpectEntry then
-    return self:expect_entry(token)
-
-  elseif self.state == BlockSequenceParserState.PostEntry then
-    return self:post_entry(token)
-  end
+  return parser()
 end
+
+local function parse_document(token_stream)
+  local token_stream = assert(token_stream)
+  local doc, root_type
+
+  local indent = 0
+
+  local parser, parse_token
+
+  parse_token = function (token)
+    if token.type == TokenType.BlockIndent then
+      indent = token.indent
+      return parser()
+
+    elseif token.type == TokenType.DocumentEnd then
+      return doc or {}
+
+    elseif token.type == TokenType.Seq and not root_type then
+      root_type = DocumentNode.Sequence
+      token_stream:push(token)
+      local token_or_doc, err = parse_block_sequence(token_stream, indent, parse_token)
+      if err then return token_or_doc, err end
+      doc = token_or_doc
+      return parser()
+
+    elseif token.type == TokenType.Seq then
+      return token, "Cannot have mixed sequences and mappings at the document root"
+
+    elseif is_scalar_token(token) and root_type ~= DocumentNode.Sequence then
+      root_type = DocumentNode.Scalar
+      doc = {
+        type = DocumentNode.Scalar,
+        content = token.text,
+        indent = indent,
+        _token = token,
+      }
+      return parser()
+
+    elseif is_scalar_token(token) then
+      return token, "Cannot have mixed sequences and mappings at the document root"
+
+    elseif token.type == TokenType.MapValue and root_type == DocumentNode.Scalar then
+      root_type = DocumentNode.Mapping
+      token_stream:push(token)
+      local token_or_doc, err = parse_block_mapping(token_stream, doc, parse_token)
+      if err then return token_or_doc, err end
+      doc = token_or_doc
+      return parser()
+
+    else
+      error "Not implemented"
+    end
+
+    if DEBUG then error "Unreachable" end
+  end
+
+  parser = function ()
+    local token = token_stream:next()
+    if not token then
+      return doc or {}
+    end
+
+    return parse_token(token)
+  end
+
+  local token_or_document_node, err = parser()
+  if err then
+    return token_or_document_node, err
+  else
+    return {
+      type = DocumentNode.Root,
+      content = token_or_document_node,
+    }
+  end
+
+  return parser()
+end
+
+
+
+
+
+
 
 
 
@@ -1817,13 +2031,18 @@ M.Parser              = Parser
 
 M.tokeniser_stream_adaptor = tokeniser_stream_adaptor
 
+M.parse_block_sequence = parse_block_sequence
+M.parse_block_mapping  = parse_block_mapping
+M.parse_document       = parse_document
+
 if DEBUG then
   M.TokeniserState           = TokeniserState
   M.BlockSequenceParserState = BlockSequenceParserState
   M.ParserContext            = ParserContext
 
-  M.print_tokeniser = print_tokeniser
-  M.print_token     = print_token
+  M.print_tokeniser     = print_tokeniser
+  M.print_token         = print_token
+  M.print_document_tree = print_document_tree
 end
 
 return M
